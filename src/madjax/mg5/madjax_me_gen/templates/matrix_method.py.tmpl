@@ -14,7 +14,7 @@ class Matrix_%(process_string)s(object):
 
         return %(external_masses)s
 
-    def smatrix(self,p, model):
+    def smatrix(self, p, model, user_helicities=None):
         #  
         %(info_lines)s
         # 
@@ -39,23 +39,16 @@ class Matrix_%(process_string)s(object):
         # LOCAL VARIABLES 
         #  
         %(helicity_lines)s
+
+        if user_helicities is None:
+            user_helicities = helicities
+
         # ----------
         # BEGIN CODE
         # ----------
-        self.helEvals = []
-        ans = 0.
 
-        # ----------
-        # OLD CODE
-        # ----------
-        #for hel in helicities:
-        #    t = self.matrix(p, hel, model)
-        #    ans = ans + t
-        #    self.helEvals.append([hel, t.real / denominator ])
-
-        t = self.vmap_matrix( p, np.array(helicities), model )
+        t = self.vmap_matrix( p, np.array(user_helicities), model )
         ans = np.sum(t)
-        self.helEvals.append( (helicities, t.real / denominator) )
         
         ans = ans * self.hel_avg_factor / self.denominator
         return ans.real
