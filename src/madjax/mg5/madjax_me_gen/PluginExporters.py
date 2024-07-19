@@ -94,7 +94,7 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
     def write_files(self):
         """Create all necessary files"""
 
-        os.makedirs(self.dir_path)
+        os.makedirs(self.dir_path, exist_ok=True)
         open(pjoin(self.dir_path, '__init__.py'), 'w')
 
         # Write Helas Routines
@@ -572,19 +572,23 @@ class PythonMEExporter(export_python.ProcessExporterPython):
 
 class PluginProcessExporterPython(object):
 
+    check = False
     exporter = 'v4'
+    output = 'dir'
+    sa_symmetry = True
     grouped_mode = False
 
     MEExporter = PythonMEExporter
     UFOModelConverter = UFOModelConverterPython
 
-    def __init__(self, export_dir, helas_call_writers):
+    def __init__(self, export_dir, opt):
         self.export_dir = export_dir
 
         # Container to keep track of all_MEs exported
         self.all_MEs = []
 
         # Automatically add this output to the python path import system
+        os.makedirs(self.export_dir, exist_ok=True)
         open(pjoin(self.export_dir, '__init__.py'), 'w').write(
             """import sys
 import os
@@ -593,7 +597,8 @@ sys.path.insert(0, root_path)
 """
         )
 
-        os.makedirs(pjoin(self.export_dir, 'processes'))
+        os.makedirs(pjoin(self.export_dir, 'Cards'), exist_ok=True)
+        os.makedirs(pjoin(self.export_dir, 'processes'), exist_ok=True)
         open(pjoin(self.export_dir, 'processes', '__init__.py'), 'w')
         all_processes = open(
             pjoin(self.export_dir, 'processes', 'all_processes.py'), 'w'
@@ -605,12 +610,37 @@ sys.path.insert(0, root_path)
         all_processes.write('from jax import vmap \n')
         all_processes.write('from jax import numpy as np \n')
         all_processes.close()
-
-        self.helas_call_writers = helas_call_writers
+        self.prefix_info = dict()
+        self.processes = set()
 
     def generate_subprocess_directory(
         self, matrix_element, dummy_helas_model, me_number
     ):
+        if self.sa_symmetry:
+            # avoid symmetric output
+            for proc in matrix_element.get('processes'):
+                tag = proc.get_tag()     
+                legs = proc.get('legs')[:]
+                leg0 = proc.get('legs')[0]
+                leg1 = proc.get('legs')[1]
+                if not leg1.get('state'):
+                    proc.get('legs')[0] = leg1
+                    proc.get('legs')[1] = leg0
+                    flegs = proc.get('legs')[2:]
+                    for perm in itertools.permutations(flegs):
+                        for i,p in enumerate(perm):
+                            proc.get('legs')[i+2] = p
+                        #restore original order
+                        permuted_tag = proc.get_tag()
+                        proc.get('legs')[2:] = legs[2:]              
+                        if permuted_tag in self.processes:
+                            proc.get('legs')[:] = legs
+                            self.processes.add(permuted_tag)
+                            return 0
+                proc.get('legs')[:] = legs
+
+                self.processes.add(tag)
+
         logger.info(
             "Now generating Python output for %s"
             % (
@@ -668,3 +698,6 @@ sys.path.insert(0, root_path)
 
     def finalize(self, matrix_elements, history, options, flaglist):
         logger.info("Finalizing...")
+
+    def pass_information_from_cmd(self, cmd):
+        self.helas_call_writers = helas_call_writers.PythonUFOHelasCallWriter(cmd._curr_model)
