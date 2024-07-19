@@ -626,6 +626,7 @@ sys.path.insert(0, root_path)
             # avoid symmetric output
             for proc in matrix_element.get('processes'):
                 tag = proc.get_tag()     
+                N = proc['id']
                 legs = proc.get('legs')[:]
                 leg0 = proc.get('legs')[0]
                 leg1 = proc.get('legs')[1]
@@ -639,13 +640,12 @@ sys.path.insert(0, root_path)
                         #restore original order
                         permuted_tag = proc.get_tag()
                         proc.get('legs')[2:] = legs[2:]              
-                        if permuted_tag in self.processes:
+                        if (permuted_tag, N) in self.processes:
                             proc.get('legs')[:] = legs
-                            self.processes.add(permuted_tag)
                             return 0
                 proc.get('legs')[:] = legs
 
-                self.processes.add(tag)
+                self.processes.add((tag, N))
 
         logger.info(
             "Now generating Python output for %s"

@@ -4,6 +4,7 @@ import jax.numpy
 import madjax
 import madgraph.interface.reweight_interface as rwgt_interface
 import madgraph.various.misc as misc
+import madgraph.various.banner as banner
 import madgraph.core.diagram_generation as diagram_generation
 import madgraph.interface.common_run_interface as common_run_interface
 import models.check_param_card as check_param_card 
@@ -46,6 +47,10 @@ class madjax_EFT:
                 for final in itertools.permutations(PDG_IDs[2:]):
                     self.denomJMs[(initial+final, v.process_id)] = V
 
+        self.tag_map = dict()
+        for k, V in self.numerJMs.items():
+            self.tag_map[k[0]] = V.pdg_order
+
         self.proc_map = dict()
         self.WC_names = WC_names
         self.codes = { 1: 'd',
@@ -86,7 +91,7 @@ class madjax_EFT:
             madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
             M = 0
             for JM in my_numerJMs:
-                M += JM.matrix(madjax_vectors, helicities, mod).real * JM.hel_avg_factor / JM.denominator
+                M += JM.smatrix(madjax_vectors, mod, [helicities])
             return jax.numpy.exp(WCs_plus_zero[0]) * M
 
         @jax.jit
@@ -97,7 +102,7 @@ class madjax_EFT:
             madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
             M = 0
             for JM in my_denomJMs:
-                M += JM.matrix(madjax_vectors, helicities, mod).real * JM.hel_avg_factor / JM.denominator
+                M += JM.smatrix(madjax_vectors, mod, [helicities])
             return M
 
         @jax.jit
@@ -108,12 +113,11 @@ class madjax_EFT:
         self.proc_map[tuple(PDG_IDs)] = (hess, denom, rewgt)
 
     def __call__(self, WCs, WCs_sampling, event, other_params=dict()):
-        flat_PDG_IDs = sum(event.get_tag_and_order()[0], start=tuple())
-        PDG_IDs = event.get_tag_and_order()[0]
+        flat_PDG_IDs = self.tag_map[tuple(sum(event.get_tag_and_order()[1], start=[]))]
+        PDG_IDs = event.get_tag_and_order()[1]
         fourvectors = event.get_momenta(PDG_IDs)
         helicities = event.get_helicity(PDG_IDs)
 
-        #boosted_fourvectors
         boost_pz = sum([p[3] for p in fourvectors[:2]])
         boost_e  = sum([p[0] for p in fourvectors[:2]])
 
@@ -127,6 +131,8 @@ class madjax_EFT:
 
         j_fourvectors = jax.numpy.array(boosted_fourvectors)
         j_helicities = jax.numpy.array(helicities)
+
+        other_params[('sminputs', 3)] = event.aqcd
 
         if flat_PDG_IDs not in self.proc_map:
             self._new_hess(flat_PDG_IDs)
@@ -490,7 +496,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         other_params = {}
         for blockname, block in self.old_param.items():
             for param in block:
-                lhacode = param.lhacode
+                lhacode = param.lhacode[0]
                 value = param.value
                 if (blockname, lhacode) not in self.diff_params:
                     other_params[(blockname, lhacode)] = value
@@ -506,7 +512,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 other_params
                 )
 
-        weights = {'orig': orig_wgt}
+        weights = {'orig': orig_wgt, '': hess[0,0]}
         for inds in itertools.combinations_with_replacement(range(hess.shape[0]), r=2):
             weight_name = '_'.join([str(i) for i in inds])
             # Get the weight value from the Hessian
@@ -517,7 +523,9 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             # For everything except 0,0 we need to divide by 2
             if inds != (0,0):
                 weight_value /= 2
-            weights[weight_name] = weight_value * orig_wgt
+            event.reweight_data[weight_name] = weight_value * orig_wgt
+            event.reweight_order.append(weight_name)
+            #weights[weight_name] = weight_value * orig_wgt
 
         return weights
 
@@ -708,11 +716,10 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             tag_name = 'rwgt_%s' % rewgtid
 
         # Essentially a copy of ParamCard.create_diff(self, new_card):
-        breakpoint()
         self.diff_params = set()
         for blockname, block in old_param.items():
             for param in block:
-                lhacode = param.lhacode
+                lhacode = param.lhacode[0]
                 value = param.value
                 new_value = new_param[blockname].get(lhacode).value
                 if not misc.equal(value, new_value, 6, zero_limit=False):
