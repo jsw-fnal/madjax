@@ -99,17 +99,6 @@ class Matrix_%(process_string)s(object):
 
         %(jamp_lines)s
 
-        # ----------
-        # OLD CODE
-        # ----------
-        #matrix = 0.
-        #for i in range(ncolor):
-        #    ztemp = 0
-        #    for j in range(ncolor):
-        #        ztemp = ztemp + cf[i][j]*jamp[j]
-        #    matrix = matrix + ztemp * jamp[i].conjugate()/denom[i]   
-        self.jamp.append(jamp)
-
-        matrix = np.sum( np.dot(np.array(cf), np.array(jamp)) * np.array(jamp).conjugate() / np.array(denom) )
+        matrix = np.sum( np.dot(np.array(cf), np.array(jamp).squeeze()) * np.array(jamp).squeeze().conjugate() / np.array(denom) )
 
         return matrix
