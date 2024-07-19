@@ -479,7 +479,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
 
 
     def save_to_pickle(self):
-        raise NotImplementedError
+        pass
 
     def load_from_pickle(self, keep_name=False):
         raise NotImplementedError
