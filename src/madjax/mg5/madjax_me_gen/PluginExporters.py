@@ -8,6 +8,7 @@
 
 import os
 import logging
+import itertools
 import aloha
 
 import aloha.create_aloha as create_aloha
@@ -415,6 +416,11 @@ class PythonMEExporter(export_python.ProcessExporterPython):
 
             replace_dict['process_string'] = process_string
 
+            ids = [l.get('id') for l in matrix_element.get('processes')[0].get('legs_with_decays')]
+            replace_dict['pdg_ids'] = ','.join([str(pdg_id) for pdg_id in ids])
+
+            replace_dict['process_id'] = str(matrix_element.get('processes')[0].get('id'))
+
             # Extract number of external particles
             (nexternal, ninitial) = matrix_element.get_nexternal_ninitial()
             replace_dict['nexternal'] = nexternal
@@ -650,6 +656,14 @@ sys.path.insert(0, root_path)
             )
         )
         exporter = self.MEExporter(matrix_element, self.helas_call_writers)
+
+        proc_prefix = matrix_element.get('processes')[0].shell_string().split('_',1)[1]
+        for proc in matrix_element.get('processes'):
+            ids = [l.get('id') for l in proc.get('legs_with_decays')]
+            self.prefix_info[(tuple(ids), proc.get('id'))] = [proc_prefix, proc.get_tag()]
+
+        allids = list(self.prefix_info.keys())
+        allprefix = [self.prefix_info[key][0] for key in allids]
 
         try:
             matrix_methods = exporter.get_python_matrix_methods(gauge_check=False)

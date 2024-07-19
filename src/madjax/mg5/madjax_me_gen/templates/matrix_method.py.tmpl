@@ -14,6 +14,15 @@ class Matrix_%(process_string)s(object):
 
         return %(external_masses)s
 
+    pdg_order = %(pdg_ids)s
+    def get_pdg_order(self):
+        return self.pdg_order
+
+    process_id = %(process_id)s
+    def get_process_id(self):
+        return self.process_id
+
+
     def smatrix(self, p, model, user_helicities=None):
         #  
         %(info_lines)s
