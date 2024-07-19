@@ -646,16 +646,10 @@ sys.path.insert(0, root_path)
             val = val.replace(denom, new_denom)
             val = val.replace(cf, new_cf)
 
-            # all_processes.write(val.replace("= +","= ").replace(denom, new_denom).replace(cf, new_cf))
             all_processes.write(val)
             all_processes.write('\n')
 
-        ###all_processes.write('\n'.join(matrix_methods.values()))
-        ###all_processes.write('\n')
         all_processes.close()
-
-        # for key, method in matrix_methods.items():
-        #    open(pjoin(self.export_dir, 'processes','process_%s.py'%key),'w').write(method)
 
     def convert_model(self, model, wanted_lorentz, wanted_couplings):
         logger.info("Now outputting the model...")
