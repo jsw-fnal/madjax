@@ -8,6 +8,7 @@ if _mg5_aMC_PLUGIN_path not in sys.path:
 
 import madjax_me_gen.PluginInterface as PluginInterface
 import madjax_me_gen.PluginExporters as PluginExporters
+import madjax_me_gen.EFT_madjax_reweight_implementation as reweight_plugin
 
 # Three types of functionality are allowed in a plugin
 #   1. new output mode
@@ -30,6 +31,9 @@ new_cluster = {}
 #    This can be activated via ./bin/mg5_aMC --mode=PLUGINNAME
 ## Put None if no dedicated command are required
 new_interface = PluginInterface.MG5aMC_PythonMEsInterface
+
+# 4. Define a new reweight module
+new_reweight = {'EFT_madjax_rw': reweight_plugin.EFT_madjax_reweight}
 
 
 ########################## CONTROL VARIABLE ####################################
