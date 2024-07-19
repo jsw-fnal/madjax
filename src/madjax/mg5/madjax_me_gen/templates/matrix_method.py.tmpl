@@ -3,6 +3,9 @@ class Matrix_%(process_string)s(object):
     def __init__(self):
         """define the object"""
         self.clean()
+        %(den_factor_line)s
+        self.denominator = denominator
+        %(hel_avg_factor_line)s
 
     def clean(self):
         self.jamp = []
@@ -36,7 +39,6 @@ class Matrix_%(process_string)s(object):
         # LOCAL VARIABLES 
         #  
         %(helicity_lines)s
-        %(den_factor_line)s
         # ----------
         # BEGIN CODE
         # ----------
@@ -55,7 +57,7 @@ class Matrix_%(process_string)s(object):
         ans = np.sum(t)
         self.helEvals.append( (helicities, t.real / denominator) )
         
-        ans = ans / denominator
+        ans = ans * self.hel_avg_factor / self.denominator
         return ans.real
     
     def vmap_matrix(self, p, hel_batch, model):

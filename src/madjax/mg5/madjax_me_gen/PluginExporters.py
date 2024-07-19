@@ -432,6 +432,10 @@ class PythonMEExporter(export_python.ProcessExporterPython):
             den_factor_line = self.get_den_factor_line(matrix_element)
             replace_dict['den_factor_line'] = den_factor_line
 
+            # Extract helicity averaging factor
+            hel_avg_factor_line = 'self.hel_avg_factor = %d' % matrix_element.get_hel_avg_factor()
+            replace_dict['hel_avg_factor_line'] = hel_avg_factor_line
+
             # Extract process info lines for all processes
             process_lines = self.get_process_info_lines(matrix_element)
             replace_dict['process_lines'] = process_lines
