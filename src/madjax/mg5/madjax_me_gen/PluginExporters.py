@@ -473,12 +473,6 @@ class PythonMEExporter(export_python.ProcessExporterPython):
             jamp_lines = self.get_jamp_lines(matrix_element)
             replace_dict['jamp_lines'] = "\n        ".join(jamp_lines)
 
-            # Extract amp2 lines
-            amp2_lines = self.get_amp2_lines(
-                matrix_element, self.config_maps.setdefault(ime, [])
-            )
-            replace_dict['amp2_lines'] = '\n        '.join(amp2_lines)
-
             method_file = open(
                 os.path.join(plugin_path, 'templates', self.matrix_method_template)
             ).read()

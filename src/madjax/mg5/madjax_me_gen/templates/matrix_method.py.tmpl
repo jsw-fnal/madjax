@@ -40,7 +40,6 @@ class Matrix_%(process_string)s(object):
         # ----------
         # BEGIN CODE
         # ----------
-        self.amp2 = [0.] * ndiags
         self.helEvals = []
         ans = 0.
 
@@ -97,8 +96,6 @@ class Matrix_%(process_string)s(object):
         jamp = [None] * ncolor
 
         %(jamp_lines)s
-
-        %(amp2_lines)s
 
         # ----------
         # OLD CODE
