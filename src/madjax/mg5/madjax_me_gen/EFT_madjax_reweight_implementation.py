@@ -107,8 +107,11 @@ class madjax_EFT:
 
         @jax.jit
         def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
-            return (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
-                    denom(WCs_sampling, fourvectors, helicities, other_params))
+            H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
+                 denom(WCs_sampling, fourvectors, helicities, other_params))
+            H2 = (H + H.T - jax.numpy.diag(jax.numpy.diag(H))).at[0,0].set(H[0,0])
+            return H2[jax.numpy.tril_indices_from(H2)]
+
 
         self.proc_map[tuple(PDG_IDs)] = (hess, denom, rewgt)
 
@@ -142,7 +145,7 @@ class madjax_EFT:
         # return hess(jax.numpy.insert(WCs, 0, 0.0), j_fourvectors, j_helicities, other_params)
         # return denom(WCs_sampling, j_fourvectors, j_helicities, other_params)
         return rewgt(
-                jax.numpy.insert(jax.numpy.array(WCs), 0, 0.0),
+                jax.numpy.array([0.0] + WCs),
                 WCs_sampling,
                 j_fourvectors,
                 j_helicities,
@@ -474,7 +477,6 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         else:
             self.madjax_numerator = self.madjax_denominator
 
-
         self.madjax_EFT = madjax_EFT(self.madjax_numerator, self.madjax_denominator)
 
 
@@ -491,41 +493,18 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         event.parse_reweight()
         orig_wgt = event.wgt
 
-        # I guess we don't really have room to handle changing the event kinematics in this reweighting plugin
+        # I guess we don't really have the machinery to handle changing the event kinematics in this reweighting plugin
 
-        other_params = {}
-        for blockname, block in self.old_param.items():
-            for param in block:
-                lhacode = param.lhacode[0]
-                value = param.value
-                if (blockname, lhacode) not in self.diff_params:
-                    other_params[(blockname, lhacode)] = value
-
-        WCs_sampling = [self.old_param[blockname].get(lhacode).value for blockname, lhacode in self.diff_params]
-        WCs = [self.new_param[blockname].get(lhacode).value for blockname, lhacode in self.diff_params]
-
-
-        hess = self.madjax_EFT(
-                WCs,
-                WCs_sampling,
+        hess_tril = self.madjax_EFT(
+                self.WCs,
+                self.WCs_sampling,
                 event,
-                other_params
+                self.other_params
                 )
 
-        weights = {'orig': orig_wgt, '': hess[0,0]}
-        for inds in itertools.combinations_with_replacement(range(hess.shape[0]), r=2):
-            weight_name = '_'.join([str(i) for i in inds])
-            # Get the weight value from the Hessian
-            weight_value = hess[inds[0],inds[1]]
-            # If it is off the diagonal, add it to the value across the diagonal
-            if inds[0] != inds[1]:
-                weight_value += hess[inds[1],inds[0]]
-            # For everything except 0,0 we need to divide by 2
-            if inds != (0,0):
-                weight_value /= 2
-            event.reweight_data[weight_name] = weight_value * orig_wgt
-            event.reweight_order.append(weight_name)
-            #weights[weight_name] = weight_value * orig_wgt
+        weights = {'orig': orig_wgt, '': hess_tril[0] * orig_wgt}
+        event.reweight_order.extend(self.weight_names)
+        event.reweight_data.update(dict(zip(self.weight_names, (hess_tril * orig_wgt).tolist())))
 
         return weights
 
@@ -717,17 +696,61 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
 
         # Essentially a copy of ParamCard.create_diff(self, new_card):
         self.diff_params = set()
+        self.block_to_pname = dict()
+        self.block_to_pname[None] = "SM"
         for blockname, block in old_param.items():
             for param in block:
+                assert len(param.lhacode) == 1, "If lhacode has a length different from 1, then I'm not sure what to do.  Contact MadJax developers."
                 lhacode = param.lhacode[0]
                 value = param.value
                 new_value = new_param[blockname].get(lhacode).value
                 if not misc.equal(value, new_value, 6, zero_limit=False):
                     self.diff_params.add((blockname, lhacode))
+
+                comment = param.comment
+                if comment.strip().startswith('set of param :'):
+                    all_var = list(re.findall(r'''[^-]1\*(\w*)\b''', comment))
+                elif len(comment.split()) == 1:
+                    all_var = [comment.strip()]
+                else:
+                    split = comment.split()
+                    if len(split) == 2:
+                        if re.search(r'''\[[A-Z]\]eV\^''', split[1]):
+                            all_var = [comment.strip()]
+                    elif len(split) >= 2 and split[1].startswith('('):
+                        all_var = [split[0].strip()]
+                    else:
+                        if not blockname.startswith('qnumbers'):
+                            logger.debug("Do not recognize information for %s %s : %s",
+                                    blockname, lhacode, comment)
+                        continue
+                assert len(all_var) == 1, "If all_var has a length larger than 1, then I'm not sure what to do.  Contact MadJax developers."
+                self.block_to_pname[(blockname, lhacode)] = all_var[0]
+
         self.diff_params = list(self.diff_params)
         self.old_param = old_param
         self.new_param = new_param
 
+        self.weight_names = []
+        self.weight_indices = []
+
+        for indices in zip(*jax.numpy.tril_indices(len(self.diff_params)+1)):
+            weight_name = '_'.join([self.block_to_pname[([None] + self.diff_params)[ind]] for ind in indices])
+            self.weight_names.append(weight_name)
+            self.weight_indices.append(indices)
+            
+
         self.madjax_EFT.set_WC_names(self.diff_params)
+
+        self.other_params = {}
+        for blockname, block in self.old_param.items():
+            for param in block:
+                lhacode = param.lhacode[0]
+                value = param.value
+                if (blockname, lhacode) not in self.diff_params:
+                    self.other_params[(blockname, lhacode)] = value
+
+        self.WCs_sampling = [self.old_param[blockname].get(lhacode).value for blockname, lhacode in self.diff_params]
+        self.WCs = [self.new_param[blockname].get(lhacode).value for blockname, lhacode in self.diff_params]
 
         return param_card_iterator, tag_name
