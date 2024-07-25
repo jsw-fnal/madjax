@@ -502,7 +502,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 self.other_params
                 )
 
-        weights = {'orig': orig_wgt, '': hess_tril[0] * orig_wgt}
+        weights = {'orig': orig_wgt}
         event.reweight_order.extend(self.weight_names)
         event.reweight_data.update(dict(zip(self.weight_names, (hess_tril * orig_wgt).tolist())))
 
@@ -735,7 +735,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         self.weight_indices = []
 
         for indices in zip(*jax.numpy.tril_indices(len(self.diff_params)+1)):
-            weight_name = '_'.join([self.block_to_pname[([None] + self.diff_params)[ind]] for ind in indices])
+            weight_name = '_'.join([tag_name] + [self.block_to_pname[([None] + self.diff_params)[ind]] for ind in indices])
             self.weight_names.append(weight_name)
             self.weight_indices.append(indices)
             
