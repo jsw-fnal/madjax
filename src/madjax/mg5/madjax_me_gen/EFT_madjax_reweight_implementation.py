@@ -11,6 +11,7 @@ import models.check_param_card as check_param_card
 import re
 import logging
 import time
+import shutil
 import os
 import sys
 import itertools
@@ -498,7 +499,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 self.other_params
                 )
 
-        weights = {'orig': orig_wgt}
+        weights = {'orig': orig_wgt, '': hess_tril[0] * orig_wgt}
         event.reweight_order.extend(self.weight_names)
         event.reweight_data.update(dict(zip(self.weight_names, (hess_tril * orig_wgt).tolist())))
 
