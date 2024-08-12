@@ -484,12 +484,11 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         pass
 
     def load_from_pickle(self, keep_name=False):
-        breakpoint()
-        raise NotImplementedError
+        self.create_standalone_directory()
+        self.compile()
 
     def calculate_weight(self, event):
         if self.has_nlo and self.rwgt_mode != "LO":
-            breakpoint()
             raise NotImplementedError
 
         event.parse_reweight()
