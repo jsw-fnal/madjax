@@ -42,4 +42,4 @@ __email__ = 'valentin.hirschi@gmail.com'
 __version__ = (0, 1, 0)
 minimal_mg5amcnlo_version = (2, 8, 1)
 maximal_mg5amcnlo_version = (1000, 1000, 1000)
-latest_validated_version = (2, 8, 1)
+latest_validated_version = (2, 9, 1000)
