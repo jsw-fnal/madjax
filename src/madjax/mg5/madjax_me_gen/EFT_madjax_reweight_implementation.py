@@ -21,6 +21,7 @@ logging.getLogger('jax._src.lib.xla_bridge').addFilter(lambda _: False)
 pjoin = os.path.join
 
 logger = logging.getLogger('decay.stdout') # -> stdout
+logger.setLevel(logging.INFO)
 
 class madjax_EFT:
     def __init__(self, madjax_instance_numerator, madjax_instance_denominator, WC_names=None):
@@ -76,7 +77,7 @@ class madjax_EFT:
         outgoing = ''.join([self.codes[ID] for ID in PDG_IDs[2:]])
         code = f'{incoming}_{outgoing}'
 
-        print(f'Compiling {code}')
+        logger.info(f'Compiling {code}')
 
         my_numerJMs = [v for k, v in self.numerJMs.items() if k[0] == PDG_IDs]
         my_denomJMs = [v for k, v in self.denomJMs.items() if k[0] == PDG_IDs]
@@ -153,12 +154,6 @@ class madjax_EFT:
                 )
 
 class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
-    def calculate_matrix_element(self, event, hypp_id, scale2=0):
-        """routine to return the matrix element"""
-
-        print("JSW")
-        return super().calculate_matrix_element(event, hypp_id, scale2)
-
     @misc.mute_logger()
     def create_standalone_tree_directory(self, data ,second=False):
         """generate the various directory for the weight evaluation"""
