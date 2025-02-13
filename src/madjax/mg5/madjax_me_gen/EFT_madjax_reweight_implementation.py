@@ -111,7 +111,13 @@ class madjax_EFT:
         def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
             H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
                  denom(WCs_sampling, fourvectors, helicities, other_params))
-            H2 = (H + H.T - jax.numpy.diag(jax.numpy.diag(H))).at[0,0].set(H[0,0])
+            # Average the hessian matrix with its transpose, to even out any
+            # differences between the forward and reverse derivatives, and
+            # divide the main diagonal, except for the [0,0] element, by 2.
+            # Then just return the lower triangular part of the matrix.  This
+            # procedure allows us to reproduce the Taylor series correctly
+            # without doing anything special.
+            H2 = ((H + H.T - jax.numpy.diag(jax.numpy.diag(H)))/2).at[0,0].set(H[0,0])
             return H2[jax.numpy.tril_indices_from(H2)]
 
 
