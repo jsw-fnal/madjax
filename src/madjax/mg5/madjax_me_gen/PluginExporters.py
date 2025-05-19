@@ -611,7 +611,7 @@ sys.path.insert(0, root_path)
         )
         # First add common imports
         all_processes.write('from __future__ import division\n')
-        all_processes.write('from model.aloha_methods import *\n')
+        all_processes.write('from ..model.aloha_methods import *\n')
         all_processes.write('from madjax.wavefunctions import *\n')
         all_processes.write('from jax import vmap \n')
         all_processes.write('from jax import numpy as np \n')
