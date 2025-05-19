@@ -11,6 +11,7 @@ import models.check_param_card as check_param_card
 import re
 import logging
 import time
+import shutil
 import os
 import sys
 import itertools
@@ -110,7 +111,13 @@ class madjax_EFT:
         def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
             H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
                  denom(WCs_sampling, fourvectors, helicities, other_params))
-            H2 = (H + H.T - jax.numpy.diag(jax.numpy.diag(H))).at[0,0].set(H[0,0])
+            # Average the hessian matrix with its transpose, to even out any
+            # differences between the forward and reverse derivatives, and
+            # divide the main diagonal, except for the [0,0] element, by 2.
+            # Then just return the lower triangular part of the matrix.  This
+            # procedure allows us to reproduce the Taylor series correctly
+            # without doing anything special.
+            H2 = ((H + H.T - jax.numpy.diag(jax.numpy.diag(H)))/2).at[0,0].set(H[0,0])
             return H2[jax.numpy.tril_indices_from(H2)]
 
 
@@ -498,7 +505,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 self.other_params
                 )
 
-        weights = {'orig': orig_wgt}
+        weights = {'orig': orig_wgt, '': hess_tril[0] * orig_wgt}
         event.reweight_order.extend(self.weight_names)
         event.reweight_data.update(dict(zip(self.weight_names, (hess_tril * orig_wgt).tolist())))
 
