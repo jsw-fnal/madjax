@@ -83,7 +83,7 @@ class madjax_EFT:
         my_numerJMs = [v for k, v in self.numerJMs.items() if k[0] == PDG_IDs]
         my_denomJMs = [v for k, v in self.denomJMs.items() if k[0] == PDG_IDs]
 
-        @jax.jit
+        @jax.jit(static_argnames=["other_params"])
         @jax.jacfwd
         @jax.jacrev
         def hess(WCs_plus_zero, fourvectors, helicities, other_params):
@@ -96,7 +96,7 @@ class madjax_EFT:
                 M += JM.smatrix(madjax_vectors, mod, [helicities])
             return jax.numpy.exp(WCs_plus_zero[0]) * M
 
-        @jax.jit
+        @jax.jit(static_argnames=["other_params"])
         def denom(WCs_sampling, fourvectors, helicities, other_params):
             params = {WC_name : WC for WC_name, WC in zip(self.WC_names, WCs_sampling)}
             params.update(other_params)
@@ -107,7 +107,7 @@ class madjax_EFT:
                 M += JM.smatrix(madjax_vectors, mod, [helicities])
             return M
 
-        @jax.jit
+        @jax.jit(static_argnames=["other_params"])
         def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
             H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
                  denom(WCs_sampling, fourvectors, helicities, other_params))
