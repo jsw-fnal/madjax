@@ -7,7 +7,7 @@ import madgraph.various.misc as misc
 import madgraph.various.banner as banner
 import madgraph.core.diagram_generation as diagram_generation
 import madgraph.interface.common_run_interface as common_run_interface
-import models.check_param_card as check_param_card 
+import models.check_param_card as check_param_card
 import re
 import logging
 import time
@@ -68,6 +68,8 @@ class madjax_EFT:
                        6: 't',
                       -6: 'tx',
                       21: 'g',
+                      23: 'z',
+                      25: 'h'
                      }
 
     def set_WC_names(self, WC_names):
@@ -741,7 +743,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             weight_name = '_'.join([tag_name] + [self.block_to_pname[([None] + self.diff_params)[ind]] for ind in indices])
             self.weight_names.append(weight_name)
             self.weight_indices.append(indices)
-            
+
 
         self.madjax_EFT.set_WC_names(self.diff_params)
 
