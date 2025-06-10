@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+sys.setrecursionlimit(5000)
+
 # put plugins in path for madjax_me_gen import
 _mg5_aMC_PLUGIN_path = str(Path(__file__).resolve().parents[1])
 if _mg5_aMC_PLUGIN_path not in sys.path:
