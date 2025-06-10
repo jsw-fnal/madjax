@@ -15,6 +15,7 @@ import shutil
 import os
 import sys
 import itertools
+from functools import partial
 
 # Eliminate unnecessary warnings from JAX
 logging.getLogger('jax._src.lib.xla_bridge').addFilter(lambda _: False)
@@ -85,7 +86,7 @@ class madjax_EFT:
         my_numerJMs = [v for k, v in self.numerJMs.items() if k[0] == PDG_IDs]
         my_denomJMs = [v for k, v in self.denomJMs.items() if k[0] == PDG_IDs]
 
-        @jax.jit(static_argnames=["other_params"])
+        @jax.jit
         @jax.jacfwd
         @jax.jacrev
         def hess(WCs_plus_zero, fourvectors, helicities, other_params):
@@ -97,8 +98,7 @@ class madjax_EFT:
             for JM in my_numerJMs:
                 M += JM.smatrix(madjax_vectors, mod, [helicities])
             return jax.numpy.exp(WCs_plus_zero[0]) * M
-
-        @jax.jit(static_argnames=["other_params"])
+        @jax.jit
         def denom(WCs_sampling, fourvectors, helicities, other_params):
             params = {WC_name : WC for WC_name, WC in zip(self.WC_names, WCs_sampling)}
             params.update(other_params)
@@ -108,8 +108,7 @@ class madjax_EFT:
             for JM in my_denomJMs:
                 M += JM.smatrix(madjax_vectors, mod, [helicities])
             return M
-
-        @jax.jit(static_argnames=["other_params"])
+        @jax.jit
         def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
             H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
                  denom(WCs_sampling, fourvectors, helicities, other_params))
