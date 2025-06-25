@@ -7,7 +7,7 @@ import madgraph.various.misc as misc
 import madgraph.various.banner as banner
 import madgraph.core.diagram_generation as diagram_generation
 import madgraph.interface.common_run_interface as common_run_interface
-import models.check_param_card as check_param_card 
+import models.check_param_card as check_param_card
 import re
 import logging
 import time
@@ -15,6 +15,7 @@ import shutil
 import os
 import sys
 import itertools
+from functools import partial
 
 # Eliminate unnecessary warnings from JAX
 logging.getLogger('jax._src.lib.xla_bridge').addFilter(lambda _: False)
@@ -68,6 +69,8 @@ class madjax_EFT:
                        6: 't',
                       -6: 'tx',
                       21: 'g',
+                      23: 'z',
+                      25: 'h'
                      }
 
     def set_WC_names(self, WC_names):
@@ -95,7 +98,6 @@ class madjax_EFT:
             for JM in my_numerJMs:
                 M += JM.smatrix(madjax_vectors, mod, [helicities])
             return jax.numpy.exp(WCs_plus_zero[0]) * M
-
         @jax.jit
         def denom(WCs_sampling, fourvectors, helicities, other_params):
             params = {WC_name : WC for WC_name, WC in zip(self.WC_names, WCs_sampling)}
@@ -106,7 +108,6 @@ class madjax_EFT:
             for JM in my_denomJMs:
                 M += JM.smatrix(madjax_vectors, mod, [helicities])
             return M
-
         @jax.jit
         def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
             H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
@@ -741,7 +742,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             weight_name = '_'.join([tag_name] + [self.block_to_pname[([None] + self.diff_params)[ind]] for ind in indices])
             self.weight_names.append(weight_name)
             self.weight_indices.append(indices)
-            
+
 
         self.madjax_EFT.set_WC_names(self.diff_params)
 

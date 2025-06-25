@@ -67,17 +67,17 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
         replace_dict={},
     ):
         """ initialization of the objects """
-        
+
         self.model = model
         self.model_name = export_cpp.ProcessExporterCPP.get_model_name(model['name'])
         self.aloha_model = create_aloha.AbstractALOHAModel(self.model_name)
-        
+
         self.dir_path = output_path
         self.default_replace_dict = dict(replace_dict)
         # List of needed ALOHA routines
         self.wanted_lorentz = wanted_lorentz
         self.wanted_couplings = wanted_couplings
-        
+
         # For dependent couplings, only want to update the ones
         # actually used in each process. For other couplings and
         # parameters, just need a list of all.
@@ -86,11 +86,11 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
         self.params_dep = []  # base_objects.ModelVariable
         self.params_indep = []  # base_objects.ModelVariable
         self.p_to_cpp = None
-        
+
         # Prepare parameters and couplings for writeout in C++
         self.prepare_parameters()
         self.prepare_couplings(wanted_couplings)
-        
+
 
     def write_files(self):
         """Create all necessary files"""
@@ -163,7 +163,7 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
             self.params_indep.insert(
                 0, base_objects.ModelVariable(param.name, expression, 'real')
             )
-        
+
 
     def prepare_couplings(self, wanted_couplings=[]):
         """Extract the couplings from the model, and store them in
@@ -356,6 +356,10 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
                     _line = _line.replace(
                         "if (M3): OM3=1.0/M3**2",
                         "OM3 = where(M3 != 0. , 1.0/M3**2, 0. )",
+                    )
+                    _line = _line.replace(
+                        "if (M1): OM1=1.0/M1**2",
+                        "OM1 = where(M1 != 0. , 1.0/M1**2, 0. )",
                     )
                     new_aloha_routine.append(_line)
             new_aloha_routines.append('\n'.join(new_aloha_routine))
@@ -625,7 +629,7 @@ sys.path.insert(0, root_path)
         if self.sa_symmetry:
             # avoid symmetric output
             for proc in matrix_element.get('processes'):
-                tag = proc.get_tag()     
+                tag = proc.get_tag()
                 N = proc['id']
                 legs = proc.get('legs')[:]
                 leg0 = proc.get('legs')[0]
@@ -639,7 +643,7 @@ sys.path.insert(0, root_path)
                             proc.get('legs')[i+2] = p
                         #restore original order
                         permuted_tag = proc.get_tag()
-                        proc.get('legs')[2:] = legs[2:]              
+                        proc.get('legs')[2:] = legs[2:]
                         if (permuted_tag, N) in self.processes:
                             proc.get('legs')[:] = legs
                             return 0
