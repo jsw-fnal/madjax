@@ -758,3 +758,17 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         self.WCs = [self.new_param[blockname].get(lhacode).value for blockname, lhacode in self.diff_params]
 
         return param_card_iterator, tag_name
+
+class Double_reweight:
+    def __init__(self, *args, **kwargs):
+        self.obj1 = rwgt_interface.ReweightInterface(*args, **kwargs)
+        self.obj2 = EFT_madjax_reweight(*args, **kwargs)
+
+    def __getattr__(self, name):
+        # Check if the attribute exists on internal objects and is callable
+        if hasattr(self.obj1, name) and callable(getattr(self.obj1, name)):
+            def method_wrapper(*args, **kwargs):
+                getattr(self.obj1, name)(*args, **kwargs)
+                getattr(self.obj2, name)(*args, **kwargs)
+            return method_wrapper
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
