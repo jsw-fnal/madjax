@@ -290,7 +290,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
 
         data={}
         if not second:
-            data['paths'] = ['rw_me', 'rw_mevirt']
+            data['paths'] = ['rw_mj_me', 'rw_mj_mevirt']
             # model
             info = self.banner.get('proc_card', 'full_model_line')
             if '-modelname' in info:
@@ -308,11 +308,11 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             #data['id2path'] = self.id_to_path
         else:
             for key in list(self.f2pylib.keys()):
-                if 'rw_me_%s' % self.nb_library in key[0]:
+                if 'rw_mj_me_%s' % self.nb_library in key[0]:
                     del self.f2pylib[key]
 
             self.nb_library += 1
-            data['paths'] = ['rw_me_%s' % self.nb_library, 'rw_mevirt_%s' % self.nb_library]
+            data['paths'] = ['rw_mj_me_%s' % self.nb_library, 'rw_mj_mevirt_%s' % self.nb_library]
 
 
             # model
@@ -461,7 +461,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             path_me = self.rwgt_dir
 
         self.madjax_objects = {}
-        rwgt_dir_possibility =   ['rw_me','rw_me_%s' % self.nb_library,'rw_mevirt','rw_mevirt_%s' % self.nb_library]
+        rwgt_dir_possibility =   ['rw_mj_me','rw_mj_me_%s' % self.nb_library,'rw_mj_mevirt','rw_mj_mevirt_%s' % self.nb_library]
         for onedir in rwgt_dir_possibility:
             if not os.path.exists(pjoin(path_me,onedir)):
                 continue
@@ -473,10 +473,10 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                     break
 
         with misc.TMP_variable(sys, 'path', [pjoin(path_me)] + sys.path):
-            self.madjax_denominator = madjax.MadJax('rw_me')
+            self.madjax_denominator = madjax.MadJax('rw_mj_me')
         if self.second_process:
             with misc.TMP_variable(sys, 'path', [pjoin(path_me)] + sys.path):
-                self.madjax_numerator = madjax.MadJax('rw_me_2')
+                self.madjax_numerator = madjax.MadJax('rw_mj_me_2')
         else:
             self.madjax_numerator = self.madjax_denominator
 
@@ -520,13 +520,13 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             path_me = self.me_dir
 
         if self.second_model or self.second_process or self.dedicated_path:
-            rw_dir = pjoin(path_me, 'rw_me_%s' % self.nb_library)
+            rw_dir = pjoin(path_me, 'rw_mj_me_%s' % self.nb_library)
         else:
-            rw_dir = pjoin(path_me, 'rw_me')
+            rw_dir = pjoin(path_me, 'rw_mj_me')
 
         if not '--keep_card' in args:
             if self.has_nlo and self.rwgt_mode != "LO":
-                rwdir_virt = rw_dir.replace('rw_me', 'rw_mevirt')
+                rwdir_virt = rw_dir.replace('rw_mj_me', 'rw_mj_mevirt')
             with open(pjoin(rw_dir, 'Cards', 'param_card.dat'), 'w') as fsock:
                 fsock.write(self.banner['slha'])
             out, cmd = common_run_interface.CommonRunCmd.ask_edit_card_static(cards=['param_card.dat'],
