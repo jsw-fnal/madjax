@@ -25,6 +25,14 @@ pjoin = os.path.join
 logger = logging.getLogger('decay.stdout') # -> stdout
 logger.setLevel(logging.INFO)
 
+jaxlogger = logging.getLogger("jax")
+jaxlogger.setLevel(logging.INFO)
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+
 class madjax_EFT:
     def __init__(self, madjax_instance_numerator, madjax_instance_denominator, WC_names=None):
         self.numer = madjax_instance_numerator
