@@ -139,8 +139,8 @@ class madjax_EFT:
     def __call__(self, WCs, WCs_sampling, event, other_params=dict()):
         flat_PDG_IDs = self.tag_map[tuple(sum(event.get_tag_and_order()[1], start=[]))]
         PDG_IDs = event.get_tag_and_order()[1]
-        fourvectors = event.get_momenta(PDG_IDs)
-        helicities = event.get_helicity(PDG_IDs)
+        fourvectors = event.get_momenta([flat_PDG_IDs[:2], flat_PDG_IDs[2:]])
+        helicities = event.get_helicity([flat_PDG_IDs[:2], flat_PDG_IDs[2:]])
 
         boost_pz = sum([p[3] for p in fourvectors[:2]])
         boost_e  = sum([p[0] for p in fourvectors[:2]])
