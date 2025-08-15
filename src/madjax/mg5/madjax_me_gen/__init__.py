@@ -35,7 +35,8 @@ new_cluster = {}
 new_interface = PluginInterface.MG5aMC_PythonMEsInterface
 
 # 4. Define a new reweight module
-new_reweight = {'EFT_madjax_rw': reweight_plugin.Double_reweight}
+#new_reweight = {'EFT_madjax_rw': reweight_plugin.Double_reweight}
+new_reweight = {'EFT_madjax_rw': reweight_plugin.EFT_madjax_reweight, 'Double': reweight_plugin.Double_reweight}
 
 
 ########################## CONTROL VARIABLE ####################################
