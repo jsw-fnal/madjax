@@ -33,7 +33,7 @@ jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 class madjax_EFT:
-    def __init__(self, madjax_instance_numerator, madjax_instance_denominator, WC_names=None):
+    def __init__(self, madjax_instance_numerator, madjax_instance_denominator, particle_dict, WC_names=None):
         self.numer = madjax_instance_numerator
         self.denom = madjax_instance_denominator
 
@@ -63,22 +63,12 @@ class madjax_EFT:
 
         self.proc_map = dict()
         self.WC_names = WC_names
-        self.codes = { 1: 'd',
-                      -1: 'dx',
-                       2: 'u',
-                      -2: 'ux',
-                       3: 's',
-                      -3: 'sx',
-                       4: 'c',
-                      -4: 'cx',
-                       5: 'b',
-                      -5: 'bx',
-                       6: 't',
-                      -6: 'tx',
-                      21: 'g',
-                      23: 'z',
-                      25: 'h'
-                     }
+        translator = str.maketrans({'~': 'x', '+': 'p', '-': 'm'})
+        self.codes = dict()
+        for key, value in particle_dict.items():
+            mg5name = value['name'] if value['is_part'] else value['antiname']
+            name = mg5name.translate(translator)
+            self.codes[key] = name
 
     def set_WC_names(self, WC_names):
         self.WC_names = WC_names
@@ -487,7 +477,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         else:
             self.madjax_numerator = self.madjax_denominator
 
-        self.madjax_EFT = madjax_EFT(self.madjax_numerator, self.madjax_denominator)
+        self.madjax_EFT = madjax_EFT(self.madjax_numerator, self.madjax_denominator, self.model.get('particle_dict'))
 
 
     def save_to_pickle(self):
