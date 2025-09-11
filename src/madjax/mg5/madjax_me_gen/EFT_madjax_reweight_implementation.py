@@ -728,7 +728,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 assert len(all_var) == 1, "If all_var has a length larger than 1, then I'm not sure what to do.  Contact MadJax developers."
                 self.block_to_pname[(blockname, lhacode)] = all_var[0]
 
-        self.diff_params = list(self.diff_params)
+        self.diff_params = sorted(list(self.diff_params))
         self.old_param = old_param
         self.new_param = new_param
 
