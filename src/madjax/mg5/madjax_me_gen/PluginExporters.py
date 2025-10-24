@@ -327,9 +327,7 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
 
         self.aloha_model.add_Lorentz_object(self.model.get('lorentz'))
         self.wanted_lorentz.sort()
-        print(self.wanted_lorentz)
         self.aloha_model.compute_subset(self.wanted_lorentz)
-        #self.aloha_model.compute_all()
         # Write out the aloha routines in Python
         aloha_routines = []
 

@@ -30,8 +30,10 @@ class MadJax(object):
                     if (initial+final) not in self.permuted_processes:
                         self.permuted_processes[initial+final] = dict()
                     self.permuted_processes[initial+final][v.process_id] = v
-                    #self.permuted_processes[(initial+final, v.process_id)] = V
 
+    # Add the __hash__ and __eq__ methods so that jax can safely use a MadJax object
+    # as a static argument to a JIT compiled function without causing persistent
+    # compilation cache misses.
     def __hash__(self):
         return int.from_bytes(hashlib.md5(self.config_name.encode()).digest(), 'big')
 
