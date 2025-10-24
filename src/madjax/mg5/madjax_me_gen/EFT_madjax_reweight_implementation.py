@@ -30,12 +30,200 @@ logger.setLevel(logging.DEBUG)
 #logger.addHandler(handler)
 
 jaxlogger = logging.getLogger("jax")
-jaxlogger.setLevel(logging.INFO)
+jaxlogger.setLevel(logging.DEBUG)
 
 jax.config.update("jax_compilation_cache_dir", "jax_cache")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-#jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+jax.config.update("jax_compilation_cache_include_metadata_in_key", False)
+jax.config.update("jax_explain_cache_misses", True)
+
+import pickle, hashlib
+
+@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numer"))
+@jax.jacrev
+@jax.jacfwd
+def hess(WCs_plus_zero, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numer):
+    #my_numerJMs = self.code_numerJMs[PDG_IDs]
+
+    params = {WC_name : WC for WC_name, WC in zip(WC_names, WCs_plus_zero[1:])}
+    params.update({other_param_name : other_param for other_param_name, other_param in zip(other_param_names, other_params)})
+    #params.update(other_params)
+    mod = numer.parameters.calculate_full_parameters(params)
+    #mod = self.numer.parameters.calculate_full_parameters(params)
+    madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
+    M = 0
+    for procID, JM in numer.permuted_processes[PDG_IDs].items():
+        M += JM.s_smatrix(madjax_vectors, mod, [helicities])
+    #for k, JMs in numer.permuted_processes.items():
+    #    for procID, JM in JMs.items():
+    #        M += JM.smatrix(madjax_vectors, mod, [helicities])
+    #    #M += jax.lax.cond(jax.numpy.all(k[0] == PDG_IDs), lambda args: JM.smatrix([madjax.phasespace.vectors.LorentzVector(v) for v in args[0]], args[1], [args[2]]), lambda args: 0., (fourvectors, mod, helicities))
+    #    #M += JM.smatrix(madjax_vectors, mod, [helicities])
+    return jax.numpy.exp(WCs_plus_zero[0]) * M
+
+@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "denom"))
+#@jax.jit
+def denom(WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, denom):
+    #my_denomJMs = self.code_denomJMs[PDG_IDs]
+
+    params = {WC_name : WC for WC_name, WC in zip(WC_names, WCs_sampling)}
+    params.update({other_param_name : other_param for other_param_name, other_param in zip(other_param_names, other_params)})
+    #params.update(other_params)
+    mod = denom.parameters.calculate_full_parameters(params)
+    #mod = self.denom.parameters.calculate_full_parameters(params)
+    madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
+    M = 0
+    for procID, JM in denom.permuted_processes[PDG_IDs].items():
+        M += JM.s_smatrix(madjax_vectors, mod, [helicities])
+    #for k, JMs in denom.permuted_processes.items():
+    #    for procID, JM in JMs.items():
+    #        M += JM.smatrix(madjax_vectors, mod, [helicities])
+    #    #M += jax.lax.cond(jax.numpy.all(k[0] == PDG_IDs), lambda args: JM.smatrix([madjax.phasespace.vectors.LorentzVector(v) for v in args[0]], args[1], [args[2]]), lambda args: 0., (fourvectors, mod, helicities))
+    #    #M += jax.lax.cond(jax.numpy.all(k[0] == PDG_IDs), lambda args: 1, lambda args: 0, (jax.numpy.array(madjax_vectors), mod, helicities))
+    #for JM in denomJMs:
+    #    M += JM.smatrix(madjax_vectors, mod, [helicities])
+    return M
+
+@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numerMJ", "denomMJ"))
+#@jax.jit
+def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numerMJ, denomMJ):
+    H = (hess(WCs_plus_zero, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numerMJ) /
+         denom(WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, denomMJ))
+    # Average the hessian matrix with its transpose, to even out any
+    # differences between the forward and reverse derivatives, and
+    # divide the main diagonal, except for the [0,0] element, by 2.
+    # Then just return the lower triangular part of the matrix.  This
+    # procedure allows us to reproduce the Taylor series correctly
+    # without doing anything special.
+    H2 = ((H + H.T - jax.numpy.diag(jax.numpy.diag(H)))/2).at[0,0].set(H[0,0])
+    return H2[jax.numpy.tril_indices_from(H2)]
+
+#sys.path.append('./rwgt')
+##print(sys.path)
+##sys.exit()
+#from rw_mj_me.model.aloha_methods import *
+#from madjax.wavefunctions import *
+#
+#import collections
+
+#@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numerMJ", "denomMJ"))
+#def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numerMJ, denomMJ):
+#    params = collections.OrderedDict()
+#    for WC_name, WC in zip(WC_names, WCs_sampling):
+#        params[WC_name] = WC
+#    for other_param_name, other_param in zip(other_param_names, other_params):
+#        params[other_param_name] = other_param
+#    #params = {WC_name : WC for WC_name, WC in zip(WC_names, WCs_sampling)}
+#    #params.update({other_param_name : other_param for other_param_name, other_param in zip(other_param_names, other_params)})
+#    mod = denomMJ.parameters.calculate_full_parameters(params)
+#    madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
+#    #print(list(mod.keys()))
+#    #return WCs_plus_zero + mod['mdl_cuWRe']
+#    #print(denomMJ.permuted_processes[PDG_IDs][1])
+#    #model = mod
+#    #p = madjax_vectors
+#    #hel = helicities
+#
+#    #ngraphs = 20
+#    #nexternal = 4
+#    #nwavefuncs = 5
+#    #ncolor = 3
+#    #ZERO = 0.
+#    ##  
+#    ## Color matrix
+#    ##  
+#    #denom = [3,3,1.];
+#    #cf = [[16,-2,6.],
+#    #[-2,16,6],
+#    #[2,2,6]];
+#    ##
+#    ## Model parameters
+#    ##
+#    #mdl_MH = model["mdl_MH"]
+#    #mdl_MT = model["mdl_MT"]
+#    #mdl_WH = model["mdl_WH"]
+#    #mdl_WT = model["mdl_WT"]
+#    #GC_1025 = model["GC_1025"]
+#    #GC_31 = model["GC_31"]
+#    #GC_32 = model["GC_32"]
+#    #GC_347 = model["GC_347"]
+#    #GC_348 = model["GC_348"]
+#    #GC_351 = model["GC_351"]
+#    #GC_352 = model["GC_352"]
+#    #GC_385 = model["GC_385"]
+#    #GC_386 = model["GC_386"]
+#    #GC_478 = model["GC_478"]
+#    #GC_6 = model["GC_6"]
+#    #GC_7 = model["GC_7"]
+#    ## ----------
+#    ## Begin code
+#    ## ----------
+#    #amp = [0] * ngraphs
+#    #w = [0] * 16
+#    #w[0] = vxxxxx(p[0],ZERO,hel[0],-1)
+#    #w[1] = vxxxxx(p[1],ZERO,hel[1],-1)
+#    #w[2] = oxxxxx(p[2],mdl_MT,hel[2],+1)
+#    #w[3] = ixxxxx(p[3],mdl_MT,hel[3],-1)
+#    ## Amplitude(s) for diagram number 1
+#    #amp[0]= FFVV3_0(w[3],w[2],w[0],w[1],GC_386)
+#    ## Amplitude(s) for diagram number 2
+#    #amp[1]= FFVV1_0(w[3],w[2],w[0],w[1],GC_385)
+#    #w[4]= VVV3P0_1(w[0],w[1],GC_478,ZERO,ZERO)
+#    ## Amplitude(s) for diagram number 3
+#    #amp[2]= FFV1_0(w[3],w[2],w[4],GC_6)
+#    #w[5]= VVV8P0_1(w[0],w[1],GC_32,ZERO,ZERO)
+#    ## Amplitude(s) for diagram number 4
+#    #amp[3]= FFV1_0(w[3],w[2],w[5],GC_6)
+#    #w[6]= VVV7P0_1(w[0],w[1],GC_31,ZERO,ZERO)
+#    ## Amplitude(s) for diagram number 5
+#    #amp[4]= FFV1_0(w[3],w[2],w[6],GC_6)
+#    #w[7]= VVV5P0_1(w[0],w[1],GC_7,ZERO,ZERO)
+#    ## Amplitude(s) for diagram number 6
+#    #amp[5]= FFV1_0(w[3],w[2],w[7],GC_6)
+#    ## Amplitude(s) for diagram number 7
+#    #amp[6]= FFV9_0(w[3],w[2],w[7],GC_352)
+#    ## Amplitude(s) for diagram number 8
+#    #amp[7]= FFV2_0(w[3],w[2],w[7],GC_351)
+#    #w[8]= VVS2_3(w[0],w[1],GC_348,mdl_MH,mdl_WH)
+#    ## Amplitude(s) for diagram number 9
+#    #amp[8]= FFS2_0(w[3],w[2],w[8],GC_1025)
+#    #w[9]= VVS4_3(w[0],w[1],GC_347,mdl_MH,mdl_WH)
+#    ## Amplitude(s) for diagram number 10
+#    #amp[9]= FFS2_0(w[3],w[2],w[9],GC_1025)
+#    #w[10]= FFV1_1(w[2],w[0],GC_6,mdl_MT,mdl_WT)
+#    ## Amplitude(s) for diagram number 11
+#    #amp[10]= FFV1_0(w[3],w[10],w[1],GC_6)
+#    ## Amplitude(s) for diagram number 12
+#    #amp[11]= FFV9_0(w[3],w[10],w[1],GC_352)
+#    ## Amplitude(s) for diagram number 13
+#    #amp[12]= FFV2_0(w[3],w[10],w[1],GC_351)
+#    #w[11]= FFV9_1(w[2],w[0],GC_352,mdl_MT,mdl_WT)
+#    ## Amplitude(s) for diagram number 14
+#    #amp[13]= FFV1_0(w[3],w[11],w[1],GC_6)
+#    #w[12]= FFV2_1(w[2],w[0],GC_351,mdl_MT,mdl_WT)
+#    ## Amplitude(s) for diagram number 15
+#    #amp[14]= FFV1_0(w[3],w[12],w[1],GC_6)
+#    #w[13]= FFV1_2(w[3],w[0],GC_6,mdl_MT,mdl_WT)
+#    ## Amplitude(s) for diagram number 16
+#    #amp[15]= FFV1_0(w[13],w[2],w[1],GC_6)
+#    ## Amplitude(s) for diagram number 17
+#    #amp[16]= FFV9_0(w[13],w[2],w[1],GC_352)
+#    ## Amplitude(s) for diagram number 18
+#    #amp[17]= FFV2_0(w[13],w[2],w[1],GC_351)
+#    #w[14]= FFV9_2(w[3],w[0],GC_352,mdl_MT,mdl_WT)
+#    ## Amplitude(s) for diagram number 19
+#    #amp[18]= FFV1_0(w[14],w[2],w[1],GC_6)
+#    #w[15]= FFV2_2(w[3],w[0],GC_351,mdl_MT,mdl_WT)
+#    ## Amplitude(s) for diagram number 20
+#    #amp[19]= FFV1_0(w[15],w[2],w[1],GC_6)
+#    #return jax.numpy.array(amp)
+#    #return denomMJ.permuted_processes[PDG_IDs][1].s_matrix(madjax_vectors, helicities, mod)
+#    #M = 0
+#    #for procID, JM in denomMJ.permuted_processes[PDG_IDs].items():
+#    #    M += JM.s_smatrix(madjax_vectors, mod, [helicities])
+#    #return M
 
 class madjax_EFT:
     def __init__(self, madjax_instance_numerator, madjax_instance_denominator, WC_names=None):
@@ -85,56 +273,28 @@ class madjax_EFT:
                       25: 'h'
                      }
 
+        self.code_numerJMs = dict()
+        self.code_denomJMs = dict()
+
     def set_WC_names(self, WC_names):
         self.WC_names = WC_names
+        self.WC_names.sort()
 
-    def _new_hess(self, PDG_IDs):
-        incoming = ''.join([self.codes[ID] for ID in PDG_IDs[:2]])
-        outgoing = ''.join([self.codes[ID] for ID in PDG_IDs[2:]])
-        code = f'{incoming}_{outgoing}'
+    #def _new_hess(self, PDG_IDs):
+        #incoming = ''.join([self.codes[ID] for ID in PDG_IDs[:2]])
+        #outgoing = ''.join([self.codes[ID] for ID in PDG_IDs[2:]])
+        #code = f'{incoming}_{outgoing}'
 
-        logger.info(f'Compiling {code}')
+        #logger.info(f'Compiling {code}')
 
-        my_numerJMs = [v for k, v in self.numerJMs.items() if k[0] == PDG_IDs]
-        my_denomJMs = [v for k, v in self.denomJMs.items() if k[0] == PDG_IDs]
-
-        @jax.jit
-        @jax.jacfwd
-        @jax.jacrev
-        def hess(WCs_plus_zero, fourvectors, helicities, other_params):
-            params = {WC_name : WC for WC_name, WC in zip(self.WC_names, WCs_plus_zero[1:])}
-            params.update(other_params)
-            mod = self.numer.parameters.calculate_full_parameters(params)
-            madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
-            M = 0
-            for JM in my_numerJMs:
-                M += JM.smatrix(madjax_vectors, mod, [helicities])
-            return jax.numpy.exp(WCs_plus_zero[0]) * M
-        @jax.jit
-        def denom(WCs_sampling, fourvectors, helicities, other_params):
-            params = {WC_name : WC for WC_name, WC in zip(self.WC_names, WCs_sampling)}
-            params.update(other_params)
-            mod = self.denom.parameters.calculate_full_parameters(params)
-            madjax_vectors = [madjax.phasespace.vectors.LorentzVector(v) for v in fourvectors]
-            M = 0
-            for JM in my_denomJMs:
-                M += JM.smatrix(madjax_vectors, mod, [helicities])
-            return M
-        @jax.jit
-        def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params):
-            H = (hess(WCs_plus_zero, fourvectors, helicities, other_params) /
-                 denom(WCs_sampling, fourvectors, helicities, other_params))
-            # Average the hessian matrix with its transpose, to even out any
-            # differences between the forward and reverse derivatives, and
-            # divide the main diagonal, except for the [0,0] element, by 2.
-            # Then just return the lower triangular part of the matrix.  This
-            # procedure allows us to reproduce the Taylor series correctly
-            # without doing anything special.
-            H2 = ((H + H.T - jax.numpy.diag(jax.numpy.diag(H)))/2).at[0,0].set(H[0,0])
-            return H2[jax.numpy.tril_indices_from(H2)]
+        #self.code_numerJMs[tuple(PDG_IDs)] = [v for k, v in self.numerJMs.items()  if k[0] == PDG_IDs]
+        #self.code_denomJMs[tuple(PDG_IDs)] = [v for k, v in self.denomJMs.items()  if k[0] == PDG_IDs]
+        #my_numerJMs = [v for k, v in self.numerJMs.items() if k[0] == PDG_IDs]
+        #my_denomJMs = [v for k, v in self.denomJMs.items() if k[0] == PDG_IDs]
 
 
-        self.proc_map[tuple(PDG_IDs)] = (hess, denom, rewgt)
+
+        #self.proc_map[tuple(PDG_IDs)] = (hess, denom, rewgt)
 
     def __call__(self, WCs, WCs_sampling, event, other_params=dict()):
         flat_PDG_IDs = self.tag_map[tuple(sum(event.get_tag_and_order()[1], start=[]))]
@@ -158,24 +318,63 @@ class madjax_EFT:
 
         other_params[('sminputs', 3)] = event.aqcd
 
-        if flat_PDG_IDs not in self.proc_map:
-            self._new_hess(flat_PDG_IDs)
+        other_param_names_list = list(other_params.keys())
+        other_param_names_list.sort()
+        other_param_values_list = [other_params[name] for name in other_param_names_list]
 
-        (hess, denom, rewgt) = self.proc_map[flat_PDG_IDs]
+        print("JSW JSW JSW")
+        #print("hash of closure vars:", hashlib.sha256(pickle.dumps(hess.__closure__)).hexdigest())
+        #print("hash of closure vars:", hashlib.sha256(pickle.dumps(denom.__closure__)).hexdigest())
+        #print("hash of closure vars:", hashlib.sha256(pickle.dumps(rewgt.__closure__)).hexdigest())
+        print(hash(tuple(self.WC_names)))
+        print(hash(tuple(flat_PDG_IDs)))
+        print(hash(self.numer))
+        print(hash(self.denom))
+        print("jsw jsw jsw")
+
+        #if flat_PDG_IDs not in self.proc_map:
+        #    self._new_hess(flat_PDG_IDs)
+
+        #(hess, denom, rewgt) = self.proc_map[flat_PDG_IDs]
 
         # return hess(jax.numpy.insert(WCs, 0, 0.0), j_fourvectors, j_helicities, other_params)
         # return denom(WCs_sampling, j_fourvectors, j_helicities, other_params)
         #logger.debug(("MJ", WCs_sampling, jax.numpy.array([0.0] + WCs)))
-        logger.debug(("MJ", j_fourvectors, j_helicities, flat_PDG_IDs, PDG_IDs))
-        logger.debug(hess(jax.numpy.array([0.0] + WCs), j_fourvectors, j_helicities, other_params)[0][0])
-        logger.debug(denom(WCs_sampling, j_fourvectors, j_helicities, other_params))
+        #logger.debug(("MJ", j_fourvectors, j_helicities, flat_PDG_IDs, PDG_IDs))
+        #logger.debug(("MJ numerator", hess(jax.numpy.array([0.0] + WCs), j_fourvectors, j_helicities, other_params, PDG_IDs)[0][0]))
+        #logger.debug(("MJ denominator", denom(WCs_sampling, j_fourvectors, j_helicities, other_params, PDG_IDs)))
         return rewgt(
                 jax.numpy.array([0.0] + WCs),
                 WCs_sampling,
                 j_fourvectors,
                 j_helicities,
-                other_params
+                jax.numpy.array(other_param_values_list),
+                tuple(other_param_names_list),
+                tuple(self.WC_names),
+                tuple(flat_PDG_IDs),
+                self.numer,
+                self.denom,
+                ##tuple(numerJMs),
+                ##tuple(denomJMs),
+                ##numer_calculate_full_parameters,
+                ##denom_calculate_full_parameters,
                 )
+        #return rewgt(
+        #        jax.numpy.array([0.0] + WCs),
+        #        WCs_sampling,
+        #        j_fourvectors,
+        #        j_helicities,
+        #        jax.numpy.array(other_param_values_list),
+        #        tuple(other_param_names_list),
+        #        tuple(self.WC_names),
+        #        tuple(flat_PDG_IDs),
+        #        self.numer,
+        #        self.denom,
+        #        #tuple(numerJMs),
+        #        #tuple(denomJMs),
+        #        #numer_calculate_full_parameters,
+        #        #denom_calculate_full_parameters,
+        #        )
 
 class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
     @misc.mute_logger()
@@ -762,6 +961,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 self.block_to_pname[(blockname, lhacode)] = all_var[0]
 
         self.diff_params = list(self.diff_params)
+        self.diff_params.sort()
         self.old_param = old_param
         self.new_param = new_param
 
@@ -1006,7 +1206,7 @@ class Double_reweight(rwgt_interface.ReweightInterface):
                     new_evt.reweight_data = {}  
                     output[(tag_name,name)].write(str(new_evt))
             #print(event.reweight_data)
-            logger.debug(f"{float(event.reweight_data['MJEFT_SM_SM'])} {float(event.reweight_data['mjeft'])} {float(event.reweight_data['MJEFT_SM_SM']) / float(event.reweight_data['mjeft'])}")
+            #logger.debug(f"{float(event.reweight_data['MJEFT_SM_SM'])} {float(event.reweight_data['mjeft'])} {float(event.reweight_data['MJEFT_SM_SM']) / float(event.reweight_data['mjeft'])}")
 
         # check normalisation of the events:
         if self.run_card and 'event_norm' in self.run_card:

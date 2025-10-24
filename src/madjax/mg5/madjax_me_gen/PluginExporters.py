@@ -326,12 +326,19 @@ class UFOModelConverterPython(export_cpp.UFOModelConverterCPP):
         """Generate the python aloha routines"""
 
         self.aloha_model.add_Lorentz_object(self.model.get('lorentz'))
+        self.wanted_lorentz.sort()
+        print(self.wanted_lorentz)
         self.aloha_model.compute_subset(self.wanted_lorentz)
+        #self.aloha_model.compute_all()
         # Write out the aloha routines in Python
         aloha_routines = []
 
         # Now write the process-depenent Feynman rules ones
-        for routine in self.aloha_model.values():
+        keys = list(self.aloha_model.keys())
+        keys.sort()
+        #for routine in self.aloha_model.values():
+        for key in keys:
+            routine = self.aloha_model[key]
             aloha_routines.append(
                 routine.write(output_dir=None, mode='mg5', language='Python')
             )
@@ -443,7 +450,7 @@ class PythonMEExporter(export_python.ProcessExporterPython):
             replace_dict['den_factor_line'] = den_factor_line
 
             # Extract helicity averaging factor
-            hel_avg_factor_line = 'self.hel_avg_factor = %d' % matrix_element.get_hel_avg_factor()
+            hel_avg_factor_line = 'hel_avg_factor = %d' % matrix_element.get_hel_avg_factor()
             replace_dict['hel_avg_factor_line'] = hel_avg_factor_line
 
             # Extract process info lines for all processes
@@ -542,6 +549,7 @@ class PythonMEExporter(export_python.ProcessExporterPython):
             ]
         parameters += [wf.get('width') for wf in matrix_element.get_all_wavefunctions()]
         parameters = list(set(parameters))
+        parameters.sort()
         if 'ZERO' in parameters:
             parameters.remove('ZERO')
 
@@ -558,6 +566,7 @@ class PythonMEExporter(export_python.ProcessExporterPython):
                 ]
             )
         )
+        couplings.sort()
 
         # return "\n        ".join([\
         #                  "%(param)s = model.%(param)s"\
@@ -619,6 +628,7 @@ sys.path.insert(0, root_path)
         all_processes.write('from madjax.wavefunctions import *\n')
         all_processes.write('from jax import vmap \n')
         all_processes.write('from jax import numpy as np \n')
+        all_processes.write('import hashlib\n')
         all_processes.close()
         self.prefix_info = dict()
         self.processes = set()

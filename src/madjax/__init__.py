@@ -1,11 +1,15 @@
 """The madjax package."""
 import jax
 import importlib
+import itertools
+import hashlib
 from madjax.phasespace.flat_phase_space_generator import FlatInvertiblePhasespace
 
 
 class MadJax(object):
     def __init__(self, config_name):
+        self.config_name = config_name
+
         all_processes = importlib.import_module(
             '{}.processes.all_processes'.format(config_name)
         )
@@ -15,6 +19,24 @@ class MadJax(object):
         self.processes = {
             k: v for k, v in all_processes.__dict__.items() if 'Matrix_' in k
         }
+
+        self.permuted_processes = dict()
+        for k, v in self.processes.items():
+            PDG_IDs = v.pdg_order
+            # Assume that we are dealing with 2 -> N scattering, not 1 -> N decay
+            # If that is not the case, then this won't work correctly!
+            for initial in itertools.permutations(PDG_IDs[:2]):
+                for final in itertools.permutations(PDG_IDs[2:]):
+                    if (initial+final) not in self.permuted_processes:
+                        self.permuted_processes[initial+final] = dict()
+                    self.permuted_processes[initial+final][v.process_id] = v
+                    #self.permuted_processes[(initial+final, v.process_id)] = V
+
+    def __hash__(self):
+        return int.from_bytes(hashlib.md5(self.config_name.encode()).digest(), 'big')
+
+    def __eq__(self, other):
+        return isinstance(other, MadJax) and self.config_name == other.config_name
 
     def phasespace_generator(self, E_cm, process_name):
         def func(external_parameters):
