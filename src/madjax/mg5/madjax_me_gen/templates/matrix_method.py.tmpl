@@ -1,19 +1,9 @@
 class Matrix_%(process_string)s(object):
     %(den_factor_line)s
     %(hel_avg_factor_line)s
-
-    def __init__(self):
-        """define the object"""
-        pass
-
-    def __hash__(self):
-        return int.from_bytes(hashlib.md5("%(process_string)s".encode()).digest(), 'big')
-
-    def __eq__(self, other):
-        return isinstance(other, Matrix_%(process_string)s)
+    %(color_matrix_lines)s
 
     def get_external_masses(self, params):
-
         return %(external_masses)s
 
     pdg_order = %(pdg_ids)s
@@ -63,7 +53,8 @@ class Matrix_%(process_string)s(object):
         return ans.real
 
     @staticmethod
-    def static_matrix(p, hel, model):
+    def static_jamp(p, hel, model):
+
         #  
         %(info_lines)s
         #
@@ -80,10 +71,6 @@ class Matrix_%(process_string)s(object):
         nwavefuncs = %(nwavefuncs)d
         ncolor = %(ncolor)d
         ZERO = 0.
-        #  
-        # Color matrix
-        #  
-        %(color_matrix_lines)s
         #
         # Model parameters
         #
@@ -99,13 +86,19 @@ class Matrix_%(process_string)s(object):
 
         %(jamp_lines)s
 
-        matrix = np.sum( np.dot(np.array(cf), np.array(jamp).squeeze()) * np.array(jamp).squeeze().conjugate() / np.array(denom) )
+        return jamp
+
+    @staticmethod
+    def static_matrix(p, hel, model):
+        jamp = __class__.static_jamp(p, hel, model)
+
+        matrix = np.sum( np.dot(np.array(__class__.cf), np.array(jamp).squeeze()) * np.array(jamp).squeeze().conjugate() / np.array(__class__.denom) )
 
         return matrix
 
 
     def smatrix(self, p, model, user_helicities=None):
-        return __class__.static_smatrix(p, model, user_helicities)
+        return self.static_smatrix(p, model, user_helicities)
     
     def matrix(self, p, hel, model):
-        return __class__.static_matrix(p, hel, model)
+        return self.static_matrix(p, hel, model)

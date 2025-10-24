@@ -14,8 +14,7 @@ import time
 import shutil
 import os
 import sys
-import itertools
-from functools import partial
+import functools
 
 # Eliminate unnecessary warnings from JAX
 logging.getLogger('jax._src.lib.xla_bridge').addFilter(lambda _: False)
@@ -29,13 +28,12 @@ jaxlogger = logging.getLogger("jax")
 jaxlogger.setLevel(logging.DEBUG)
 
 jax.config.update("jax_compilation_cache_dir", "jax_cache")
-jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
-jax.config.update("jax_compilation_cache_include_metadata_in_key", False)
 jax.config.update("jax_explain_cache_misses", True)
 
-@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numer"))
+@functools.partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numer"))
 @jax.jacrev
 @jax.jacfwd
 def hess(WCs_plus_zero, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numer):
@@ -48,7 +46,7 @@ def hess(WCs_plus_zero, fourvectors, helicities, other_params, other_param_names
         M += JM.static_smatrix(madjax_vectors, mod, [helicities])
     return jax.numpy.exp(WCs_plus_zero[0]) * M
 
-@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "denom"))
+@functools.partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "denom"))
 def denom(WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, denom):
     params = {WC_name : WC for WC_name, WC in zip(WC_names, WCs_sampling)}
     params.update({other_param_name : other_param for other_param_name, other_param in zip(other_param_names, other_params)})
@@ -59,7 +57,7 @@ def denom(WCs_sampling, fourvectors, helicities, other_params, other_param_names
         M += JM.static_smatrix(madjax_vectors, mod, [helicities])
     return M
 
-@partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numerMJ", "denomMJ"))
+@functools.partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numerMJ", "denomMJ"))
 def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numerMJ, denomMJ):
     H = (hess(WCs_plus_zero, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, numerMJ) /
          denom(WCs_sampling, fourvectors, helicities, other_params, other_param_names, WC_names, PDG_IDs, denomMJ))
@@ -77,25 +75,13 @@ class madjax_EFT:
         self.numer = madjax_instance_numerator
         self.denom = madjax_instance_denominator
 
-        self.tag_map = dict()
-        for k, v in self.numer.processes.items():
-            # Assume that we are dealing with 2 -> N scattering, not 1 -> N decay
-            # If that is not the case, then this won't work correctly!
-            PDG_IDs = v.pdg_order
-            for initial in itertools.permutations(PDG_IDs[:2]):
-                for final in itertools.permutations(PDG_IDs[2:]):
-                    self.tag_map[initial+final] = v.pdg_order
-
-        self.WC_names = WC_names
-        if self.WC_names is not None:
-            self.WC_names.sort()
+        self.set_WC_names(WC_names)
 
     def set_WC_names(self, WC_names):
         self.WC_names = WC_names
-        self.WC_names.sort()
 
     def __call__(self, WCs, WCs_sampling, event, other_params=dict()):
-        flat_PDG_IDs = self.tag_map[tuple(sum(event.get_tag_and_order()[1], start=[]))]
+        flat_PDG_IDs = self.numer.tag_map[tuple(sum(event.get_tag_and_order()[1], start=[]))]
         fourvectors = event.get_momenta([flat_PDG_IDs[:2], flat_PDG_IDs[2:]])
         helicities = event.get_helicity([flat_PDG_IDs[:2], flat_PDG_IDs[2:]])
 

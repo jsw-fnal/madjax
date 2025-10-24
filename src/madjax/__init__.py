@@ -2,14 +2,11 @@
 import jax
 import importlib
 import itertools
-import hashlib
 from madjax.phasespace.flat_phase_space_generator import FlatInvertiblePhasespace
 
 
 class MadJax(object):
     def __init__(self, config_name):
-        self.config_name = config_name
-
         all_processes = importlib.import_module(
             '{}.processes.all_processes'.format(config_name)
         )
@@ -20,6 +17,7 @@ class MadJax(object):
             k: v for k, v in all_processes.__dict__.items() if 'Matrix_' in k
         }
 
+        self.tag_map = dict()
         self.permuted_processes = dict()
         for k, v in self.processes.items():
             PDG_IDs = v.pdg_order
@@ -30,15 +28,7 @@ class MadJax(object):
                     if (initial+final) not in self.permuted_processes:
                         self.permuted_processes[initial+final] = dict()
                     self.permuted_processes[initial+final][v.process_id] = v
-
-    # Add the __hash__ and __eq__ methods so that jax can safely use a MadJax object
-    # as a static argument to a JIT compiled function without causing persistent
-    # compilation cache misses.
-    def __hash__(self):
-        return int.from_bytes(hashlib.md5(self.config_name.encode()).digest(), 'big')
-
-    def __eq__(self, other):
-        return isinstance(other, MadJax) and self.config_name == other.config_name
+                    self.tag_map[initial+final] = v.pdg_order
 
     def phasespace_generator(self, E_cm, process_name):
         def func(external_parameters):

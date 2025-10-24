@@ -483,7 +483,7 @@ class PythonMEExporter(export_python.ProcessExporterPython):
 
             # Extract color data lines
             color_matrix_lines = self.get_color_matrix_lines(matrix_element)
-            replace_dict['color_matrix_lines'] = "\n        ".join(color_matrix_lines)
+            replace_dict['color_matrix_lines'] = "\n    ".join(color_matrix_lines)
 
             # External masses
             replace_dict['external_masses'] = self.get_external_masses(matrix_element)
@@ -626,7 +626,6 @@ sys.path.insert(0, root_path)
         all_processes.write('from madjax.wavefunctions import *\n')
         all_processes.write('from jax import vmap \n')
         all_processes.write('from jax import numpy as np \n')
-        all_processes.write('import hashlib\n')
         all_processes.close()
         self.prefix_info = dict()
         self.processes = set()
