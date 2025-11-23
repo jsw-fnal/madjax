@@ -8,6 +8,7 @@ import madgraph.various.banner as banner
 import madgraph.core.diagram_generation as diagram_generation
 import madgraph.interface.common_run_interface as common_run_interface
 import models.check_param_card as check_param_card
+import madgraph.iolibs.files as files
 import re
 import logging
 import time
@@ -16,6 +17,10 @@ import os
 import sys
 import itertools
 from functools import partial
+from jax import checkpoint
+from jax.experimental.serialize_executable import serialize as serialize_compiled
+from jax.experimental.serialize_executable import deserialize_and_load as deserialize_compiled
+import pickle
 
 # Eliminate unnecessary warnings from JAX
 logging.getLogger('jax._src.lib.xla_bridge').addFilter(lambda _: False)
@@ -28,12 +33,10 @@ logger.setLevel(logging.DEBUG)
 jaxlogger = logging.getLogger("jax")
 jaxlogger.setLevel(logging.DEBUG)
 
-jax.config.update("jax_compilation_cache_dir", "jax_cache")
-jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
-jax.config.update("jax_compilation_cache_include_metadata_in_key", False)
-jax.config.update("jax_explain_cache_misses", True)
+jax.config.update("jax_enable_x64", False)
+
+rewgt_path = "rewgt_functions"
+os.makedirs(rewgt_path, exist_ok=True)
 
 @partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numer"))
 @jax.jacrev
@@ -76,6 +79,7 @@ class madjax_EFT:
     def __init__(self, madjax_instance_numerator, madjax_instance_denominator, WC_names=None):
         self.numer = madjax_instance_numerator
         self.denom = madjax_instance_denominator
+        self._memory_cache = {}
 
         self.tag_map = dict()
         for k, v in self.numer.processes.items():
@@ -94,8 +98,15 @@ class madjax_EFT:
         self.WC_names = WC_names
         self.WC_names.sort()
 
+    def reset(self):
+        self._memory_cache = {}
+
     def __call__(self, WCs, WCs_sampling, event, other_params=dict()):
         flat_PDG_IDs = self.tag_map[tuple(sum(event.get_tag_and_order()[1], start=[]))]
+        event_id = event.get_tag_and_order()[1]
+        flat_event_id = [x for sublist in event_id for x in sublist]
+        string_event_id = [str(item) for item in flat_event_id]
+        concat_event_id = ''.join(string_event_id)
         fourvectors = event.get_momenta([flat_PDG_IDs[:2], flat_PDG_IDs[2:]])
         helicities = event.get_helicity([flat_PDG_IDs[:2], flat_PDG_IDs[2:]])
 
@@ -119,17 +130,51 @@ class madjax_EFT:
         other_param_names_list.sort()
         other_param_values_list = [other_params[name] for name in other_param_names_list]
 
-        return rewgt(
+        if concat_event_id in self._memory_cache:
+            compiled_rewgt = self._memory_cache[concat_event_id]
+
+        else:
+            # compile here?
+            if os.path.exists(f"rewgt_functions/compiled_{concat_event_id}"):
+                print("Loading compiled function from disk")
+                with open(f"rewgt_functions/compiled_{concat_event_id}", "rb") as f:
+                    serialized, in_tree, out_tree = pickle.load(f)
+                    compiled_rewgt = deserialize_compiled(serialized, in_tree, out_tree)
+                self._memory_cache[concat_event_id] = compiled_rewgt
+            else:
+                print("Compiling from scratch")
+                #traced_rewgt = rewgt.trace(
+                lowered_rewgt = rewgt.lower(
+                        jax.numpy.array([0.0] + WCs),
+                        WCs_sampling,
+                        j_fourvectors,
+                        j_helicities,
+                        jax.numpy.array(other_param_values_list),
+                        tuple(other_param_names_list),
+                        tuple(self.WC_names),
+                        tuple(flat_PDG_IDs),
+                        self.numer,
+                        self.denom,
+                        )
+                #lowered_rewgt = traced_rewgt.lower()
+                compiled_rewgt = lowered_rewgt.compile()
+                serialized_rewgt = serialize_compiled(compiled_rewgt)
+
+                with open(f"rewgt_functions/compiled_{concat_event_id}", "wb") as f:
+                    pickle.dump(serialized_rewgt, f)
+
+
+        return compiled_rewgt(
                 jax.numpy.array([0.0] + WCs),
                 WCs_sampling,
                 j_fourvectors,
                 j_helicities,
-                jax.numpy.array(other_param_values_list),
-                tuple(other_param_names_list),
-                tuple(self.WC_names),
-                tuple(flat_PDG_IDs),
-                self.numer,
-                self.denom,
+                jax.numpy.array(other_param_values_list)#,
+                #tuple(other_param_names_list),
+                #tuple(self.WC_names),
+                #tuple(flat_PDG_IDs),
+                #self.numer,
+                #self.denom,
                 )
 
 class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
@@ -730,3 +775,277 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         self.WCs = [self.new_param[blockname].get(lhacode).value for blockname, lhacode in self.diff_params]
 
         return param_card_iterator, tag_name
+
+    @misc.mute_logger()
+    def do_launch(self, line):
+        """end of the configuration launched the code"""
+
+        args = self.split_arg(line)
+        opts = self.check_launch(args)
+        if opts['rwgt_name']:
+            self.options['rwgt_name'] = opts['rwgt_name']
+        if opts['rwgt_info']:
+            self.options['rwgt_info'] = opts['rwgt_info']
+        model_line = self.banner.get('proc_card', 'full_model_line')
+
+        if not self.has_standalone_dir:
+            if self.rwgt_dir and os.path.exists(pjoin(self.rwgt_dir,'rw_me','rwgt.pkl')):
+                self.load_from_pickle()
+                if opts['rwgt_name']:
+                    self.options['rwgt_name'] = opts['rwgt_name']
+                if not self.rwgt_dir:
+                    self.me_dir = self.rwgt_dir
+                self.load_module()       # load the fortran information from the f2py module
+            elif self.multicore == 'wait':
+                i=0
+                while not os.path.exists(pjoin(self.me_dir,'rw_me','rwgt.pkl')):
+                    time.sleep(10+i)
+                    i+=5
+                    print('wait for pickle')
+                print("loading from pickle")
+                if not self.rwgt_dir:
+                    self.rwgt_dir = self.me_dir
+                self.load_from_pickle(keep_name=True)
+                self.load_module()
+            else:
+                self.create_standalone_directory()
+                self.compile()
+                self.load_module()
+                if self.multicore == 'create':
+                    self.load_module()
+                    if not self.rwgt_dir:
+                        self.rwgt_dir = self.me_dir
+                    self.save_to_pickle()
+
+        # get the mode of reweighting #LO/NLO/NLO_tree/...
+        type_rwgt = self.get_weight_names()
+        # get iterator over param_card and the name associated to the current reweighting.
+        param_card_iterator, tag_name = self.handle_param_card(model_line, args, type_rwgt)
+
+        if self.rwgt_dir:
+            path_me =self.rwgt_dir
+        else:
+            path_me = self.me_dir
+
+        if self.second_model or self.second_process or self.dedicated_path:
+            rw_dir = pjoin(path_me, 'rw_me_%s' % self.nb_library)
+        else:
+            rw_dir = pjoin(path_me, 'rw_me')
+
+        start = time.time()
+        # initialize the collector for the various re-weighting
+        cross, ratio, ratio_square,error = {},{},{}, {}
+        for name in type_rwgt + ['orig']:
+            cross[name], error[name] = 0.,0.
+            ratio[name],ratio_square[name] = 0., 0.# to compute the variance and associate error
+
+        if self.output_type == "default":
+            output = open( self.lhe_input.path +'rw', 'w')
+            #write the banner to the output file
+            self.banner.write(output, close_tag=False)
+        else:
+            output = {}
+            if tag_name.isdigit():
+                name_tag= 'rwgt_%s' % tag_name
+            else:
+                name_tag = tag_name
+            base = os.path.dirname(self.lhe_input.name)
+            for rwgttype in  type_rwgt:
+                output[(name_tag,rwgttype)] = lhe_parser.EventFile(pjoin(base,'rwgt_events%s_%s.lhe.gz' %(rwgttype,tag_name)), 'w')
+                #write the banner to the output file
+                self.banner.write(output[(name_tag,rwgttype)], close_tag=False)
+
+        if self.lhe_input.closed:
+            self.lhe_input = lhe_parser.EventFile(self.lhe_input.name)
+
+        self.lhe_input.seek(0)
+
+        pdgIds_list = []
+        seen_pdgs=set()
+        for event_nb, event in enumerate(self.lhe_input):
+            nested_pdgs = event.get_tag_and_order()[1]
+
+            # 2. Flatten the list (using the fast list comprehension method)
+            flat_pdgs = [x for sublist in nested_pdgs for x in sublist]
+
+            # 3. Convert to tuple to check for uniqueness
+            pdg_tuple = tuple(flat_pdgs)
+
+            # 4. Only append if we haven't seen this combination before
+            if pdg_tuple not in seen_pdgs:
+                seen_pdgs.add(pdg_tuple)
+                pdgIds_list.append(flat_pdgs)
+        print('===================================================')
+        print(pdgIds_list)
+
+        if self.lhe_input.closed:
+            self.lhe_input = lhe_parser.EventFile(self.lhe_input.name)
+        self.lhe_input.seek(0)
+
+        for subproc in pdgIds_list:
+            print("Reweighting for subprocess:", subproc)
+            if self.lhe_input.closed:
+                self.lhe_input = lhe_parser.EventFile(self.lhe_input.name)
+            self.lhe_input.seek(0)
+            for event_nb,event in enumerate(self.lhe_input):
+                event_id = event.get_tag_and_order()[1]
+                flat_event_id = [x for sublist in event_id for x in sublist]
+                if flat_event_id != subproc:
+                    continue
+                #control logger
+                if (event_nb % max(int(10**int(math.log10(float(event_nb)+1))),10)==0):
+                        running_time = misc.format_timer(time.time()-start)
+                        logger.info('Event nb %s %s' % (event_nb, running_time))
+                if (event_nb==10001): logger.info('reducing number of print status. Next status update in 10000 events')
+                if (event_nb==100001): logger.info('reducing number of print status. Next status update in 100000 events')
+
+
+                weight = self.calculate_weight(event)
+                if not isinstance(weight, dict):
+                    weight = {'':weight}
+
+                for name in weight:
+                    cross[name] += weight[name]
+                    ratio[name] += weight[name]/event.wgt
+                    ratio_square[name] += (weight[name]/event.wgt)**2
+
+                # ensure to have a consistent order of the weights. new one are put
+                # at the back, remove old position if already defines
+                for tag in type_rwgt:
+                    try:
+                        event.reweight_order.remove('%s%s'  % (tag_name,tag))
+                    except ValueError:
+                        continue
+
+                event.reweight_order += ['%s%s' % (tag_name,name) for name in type_rwgt]
+                if self.output_type == "default":
+                    for name in weight:
+                        if 'orig' in name:
+                            continue
+                        event.reweight_data['%s%s' % (tag_name,name)] = weight[name]
+                        #write this event with weight
+                    output.write(str(event))
+                else:
+                    for i,name in enumerate(weight):
+                        if 'orig' in name:
+                            continue
+                        if weight[name] == 0:
+                            continue
+                        new_evt = lhe_parser.Event(str(event))
+                        new_evt.wgt = weight[name]
+                        new_evt.parse_reweight()
+                        new_evt.reweight_data = {}
+                        output[(tag_name,name)].write(str(new_evt))
+            self.madjax_EFT.reset()
+            jax.clear_caches()
+            #backend = jax.lib.xla_bridge.get_backend()
+            #for buf in backend.live_buffers():
+            #    buf.delete()
+
+        # check normalisation of the events:
+        if self.run_card and 'event_norm' in self.run_card:
+            if self.run_card['event_norm'] in ['average','bias']:
+                for key, value in cross.items():
+                    cross[key] = value / (event_nb+1)
+
+        running_time = misc.format_timer(time.time()-start)
+        logger.info('All event done  (nb_event: %s) %s' % (event_nb+1, running_time))
+
+
+        if self.output_type == "default":
+            output.write('</LesHouchesEvents>\n')
+            output.close()
+        else:
+            for key in output:
+                output[key].write('</LesHouchesEvents>\n')
+                output[key].close()
+                if self.systematics and len(output) ==1:
+                    try:
+                        logger.info('running systematics computation')
+                        import madgraph.various.systematics as syst
+
+                        if not isinstance(self.systematics, bool):
+                            args = [output[key].name, output[key].name] + self.systematics
+                        else:
+                            args = [output[key].name, output[key].name]
+                        if self.mother and self.mother.options['lhapdf']:
+                            args.append('--lhapdf_config=%s' % self.mother.options['lhapdf'])
+                        syst.call_systematics(args, result=open('rwg_syst_%s.result' % key[0],'w'),
+                                              log=logger.info)
+                    except Exception:
+                        logger.error('fail to add systematics')
+                        raise
+        # add output information
+        if self.mother and hasattr(self.mother, 'results'):
+            run_name = self.mother.run_name
+            results = self.mother.results
+            results.add_run(run_name, self.run_card, current=True)
+            results.add_detail('nb_event', event_nb+1)
+            name = type_rwgt[0]
+            results.add_detail('cross', cross[name])
+            event_nb +=1
+            for name in type_rwgt:
+                variance = ratio_square[name]/event_nb - (ratio[name]/event_nb)**2
+                orig_cross, orig_error = self.orig_cross
+                error[name] = math.sqrt(max(0,variance/math.sqrt(event_nb))) * orig_cross + ratio[name]/event_nb * orig_error
+            results.add_detail('error', error[type_rwgt[0]])
+            import madgraph.interface.madevent_interface as ME_interface
+
+        self.lhe_input.close()
+        if not self.mother:
+            name, ext = self.lhe_input.name.rsplit('.',1)
+            target = '%s_out.%s' % (name, ext)
+        elif self.output_type != "default" :
+            target = pjoin(self.mother.me_dir, 'Events', run_name, 'events.lhe')
+        else:
+            target = self.lhe_input.name
+
+        if self.output_type == "default":
+            files.mv(output.name, target)
+            logger.info('Event %s have now the additional weight' % self.lhe_input.name)
+        elif self.output_type == "unweight":
+            for key in output:
+                #output[key].write('</LesHouchesEvents>\n')
+                #output.close()
+                lhe = lhe_parser.EventFile(output[key].name)
+                nb_event = lhe.unweight(target)
+                if self.mother and  hasattr(self.mother, 'results'):
+                    results = self.mother.results
+                    results.add_detail('nb_event', nb_event)
+                    results.current.parton.append('lhe')
+                logger.info('Event %s is now unweighted under the new theory: %s(%s)' % (lhe.name, target, nb_event))
+        else:
+            if self.mother and  hasattr(self.mother, 'results'):
+                results = self.mother.results
+                results.current.parton.append('lhe')
+            logger.info('Eventfiles is/are now created with new central weight')
+
+        if self.multicore != 'create':
+            for name in cross:
+                if name == 'orig':
+                    continue
+                logger.info('new cross-section is %s: %g pb (indicative error: %g pb)' %\
+                        ('(%s)' %name if name else '',cross[name], error[name]))
+
+        self.terminate_fortran_executables(new_card_only=True)
+        #store result
+        for name in cross:
+            if name == 'orig':
+                self.all_cross_section[name] = (cross[name], error[name])
+            else:
+                self.all_cross_section[(tag_name,name)] = (cross[name], error[name])
+
+        # perform the scanning
+        if param_card_iterator:
+            if self.options['rwgt_name']:
+                reweight_name = self.options['rwgt_name'].rsplit('_',1)[0] # to avoid side effect during the scan
+            else:
+                reweight_name = None
+            for i,card in enumerate(param_card_iterator):
+                if reweight_name:
+                    self.options['rwgt_name'] = '%s_%s' % (reweight_name, i+1)
+                self.new_param_card = card
+                #card.write(pjoin(rw_dir, 'Cards', 'param_card.dat'))
+                self.exec_cmd("launch --keep_card", printcmd=False, precmd=True)
+
+        self.options['rwgt_name'] = None
