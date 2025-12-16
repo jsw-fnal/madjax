@@ -35,6 +35,9 @@ jaxlogger.setLevel(logging.DEBUG)
 
 jax.config.update("jax_enable_x64", False)
 
+# This is the directory which houses the serialized executables
+# in the gridpack, this directory makes sense
+# when compiling we may want something else
 rewgt_path = "rewgt_functions"
 os.makedirs(rewgt_path, exist_ok=True)
 
@@ -134,16 +137,16 @@ class madjax_EFT:
             compiled_rewgt = self._memory_cache[concat_event_id]
 
         else:
-            # compile here?
+            # first check if we have the comiled function on disk
             if os.path.exists(f"rewgt_functions/compiled_{concat_event_id}"):
                 print("Loading compiled function from disk")
                 with open(f"rewgt_functions/compiled_{concat_event_id}", "rb") as f:
                     serialized, in_tree, out_tree = pickle.load(f)
                     compiled_rewgt = deserialize_compiled(serialized, in_tree, out_tree)
+                # once it is opened, keep the reweight function in memory to avoid loading overhead
                 self._memory_cache[concat_event_id] = compiled_rewgt
-            else:
+            else: # if we don't have the function yet, we need to compile it
                 print("Compiling from scratch")
-                #traced_rewgt = rewgt.trace(
                 lowered_rewgt = rewgt.lower(
                         jax.numpy.array([0.0] + WCs),
                         WCs_sampling,
@@ -156,8 +159,8 @@ class madjax_EFT:
                         self.numer,
                         self.denom,
                         )
-                #lowered_rewgt = traced_rewgt.lower()
                 compiled_rewgt = lowered_rewgt.compile()
+                # once compiled, serialize and write to disk
                 serialized_rewgt = serialize_compiled(compiled_rewgt)
 
                 with open(f"rewgt_functions/compiled_{concat_event_id}", "wb") as f:
@@ -169,12 +172,7 @@ class madjax_EFT:
                 WCs_sampling,
                 j_fourvectors,
                 j_helicities,
-                jax.numpy.array(other_param_values_list)#,
-                #tuple(other_param_names_list),
-                #tuple(self.WC_names),
-                #tuple(flat_PDG_IDs),
-                #self.numer,
-                #self.denom,
+                jax.numpy.array(other_param_values_list)
                 )
 
 class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
@@ -860,21 +858,20 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
 
         self.lhe_input.seek(0)
 
+        # find all the unique initial-final states by scanning the LHE
         pdgIds_list = []
         seen_pdgs=set()
         for event_nb, event in enumerate(self.lhe_input):
             nested_pdgs = event.get_tag_and_order()[1]
 
-            # 2. Flatten the list (using the fast list comprehension method)
             flat_pdgs = [x for sublist in nested_pdgs for x in sublist]
 
-            # 3. Convert to tuple to check for uniqueness
             pdg_tuple = tuple(flat_pdgs)
 
-            # 4. Only append if we haven't seen this combination before
             if pdg_tuple not in seen_pdgs:
                 seen_pdgs.add(pdg_tuple)
                 pdgIds_list.append(flat_pdgs)
+
         print('===================================================')
         print(pdgIds_list)
 
@@ -882,11 +879,13 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             self.lhe_input = lhe_parser.EventFile(self.lhe_input.name)
         self.lhe_input.seek(0)
 
+        # outer loop over subprocesses
         for subproc in pdgIds_list:
             print("Reweighting for subprocess:", subproc)
             if self.lhe_input.closed:
                 self.lhe_input = lhe_parser.EventFile(self.lhe_input.name)
-            self.lhe_input.seek(0)
+            self.lhe_input.seek(0) # make sure the file is open and start from the beginning
+            # loop over all events
             for event_nb,event in enumerate(self.lhe_input):
                 event_id = event.get_tag_and_order()[1]
                 flat_event_id = [x for sublist in event_id for x in sublist]
@@ -936,11 +935,9 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                         new_evt.parse_reweight()
                         new_evt.reweight_data = {}
                         output[(tag_name,name)].write(str(new_evt))
+            # make sure to clear what we can; the reweight function and jax caches
             self.madjax_EFT.reset()
             jax.clear_caches()
-            #backend = jax.lib.xla_bridge.get_backend()
-            #for buf in backend.live_buffers():
-            #    buf.delete()
 
         # check normalisation of the events:
         if self.run_card and 'event_norm' in self.run_card:
