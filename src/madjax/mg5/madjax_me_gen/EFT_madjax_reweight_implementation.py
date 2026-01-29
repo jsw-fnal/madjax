@@ -38,7 +38,7 @@ jax.config.update("jax_enable_x64", False)
 # This is the directory which houses the serialized executables
 # in the gridpack, this directory makes sense
 # when compiling we may want something else
-rewgt_path = "rewgt_functions"
+rewgt_path = "rewgt_functions/"
 os.makedirs(rewgt_path, exist_ok=True)
 
 @partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numer"))
@@ -138,9 +138,9 @@ class madjax_EFT:
 
         else:
             # first check if we have the comiled function on disk
-            if os.path.exists(f"rewgt_functions/compiled_{concat_event_id}"):
+            if os.path.exists(rewgt_path + f"compiled_{concat_event_id}"):
                 print("Loading compiled function from disk")
-                with open(f"rewgt_functions/compiled_{concat_event_id}", "rb") as f:
+                with open(rewgt_path + f"compiled_{concat_event_id}", "rb") as f:
                     serialized, in_tree, out_tree = pickle.load(f)
                     compiled_rewgt = deserialize_compiled(serialized, in_tree, out_tree)
                 # once it is opened, keep the reweight function in memory to avoid loading overhead
@@ -163,7 +163,7 @@ class madjax_EFT:
                 # once compiled, serialize and write to disk
                 serialized_rewgt = serialize_compiled(compiled_rewgt)
 
-                with open(f"rewgt_functions/compiled_{concat_event_id}", "wb") as f:
+                with open(rewgt_path + f"compiled_{concat_event_id}", "wb") as f:
                     pickle.dump(serialized_rewgt, f)
 
 
