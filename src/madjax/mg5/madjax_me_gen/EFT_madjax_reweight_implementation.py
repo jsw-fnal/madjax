@@ -70,8 +70,15 @@ def rewgt(WCs_plus_zero, WCs_sampling, fourvectors, helicities, other_params, ot
     H2 = ((H + H.T - jax.numpy.diag(jax.numpy.diag(H)))/2).at[0,0].set(H[0,0])
     return H2[jax.numpy.tril_indices_from(H2)]
 
+jaxlogger = logging.getLogger("jax")
+jaxlogger.setLevel(logging.INFO)
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+
 class madjax_EFT:
-    def __init__(self, madjax_instance_numerator, madjax_instance_denominator, WC_names=None):
+    def __init__(self, madjax_instance_numerator, madjax_instance_denominator, particle_dict, WC_names=None):
         self.numer = madjax_instance_numerator
         self.denom = madjax_instance_denominator
 
@@ -437,7 +444,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         else:
             self.madjax_numerator = self.madjax_denominator
 
-        self.madjax_EFT = madjax_EFT(self.madjax_numerator, self.madjax_denominator)
+        self.madjax_EFT = madjax_EFT(self.madjax_numerator, self.madjax_denominator, self.model.get('particle_dict'))
 
 
     def save_to_pickle(self):
