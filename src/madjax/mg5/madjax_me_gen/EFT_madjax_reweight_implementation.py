@@ -27,19 +27,28 @@ logging.getLogger('jax._src.lib.xla_bridge').addFilter(lambda _: False)
 
 pjoin = os.path.join
 
+# =========================================================================
+# --- UNIFIED CONFIGURATION ---
+# =========================================================================
+is_compile_only = os.environ.get("JAX_COMPILE_ONLY") == "1"
+compile_idx = os.environ.get("JAX_COMPILE_INDEX")
+
+# Fallback to the working gridpack local directory if the env var isn't set!
+rewgt_path = os.environ.get("JAX_REWGT_CACHE_PATH", "reweight_functions/")
+os.makedirs(rewgt_path, exist_ok=True)
+
+# Suppress logs only if we are in compile mode to save disk space
+log_level = logging.ERROR if is_compile_only else logging.DEBUG
+
 logger = logging.getLogger('decay.stdout') # -> stdout
-logger.setLevel(logging.DEBUG)
+logger.setLevel(log_level)
 
 jaxlogger = logging.getLogger("jax")
-jaxlogger.setLevel(logging.DEBUG)
+jaxlogger.setLevel(log_level)
 
 jax.config.update("jax_enable_x64", False)
+# =========================================================================
 
-# This is the directory which houses the serialized executables
-# in the gridpack, this directory makes sense
-# when compiling we may want something else
-rewgt_path = "rewgt_functions/"
-os.makedirs(rewgt_path, exist_ok=True)
 
 @partial(jax.jit, static_argnames=("other_param_names", "WC_names", "PDG_IDs", "numer"))
 @jax.jacrev
@@ -137,7 +146,7 @@ class madjax_EFT:
             compiled_rewgt = self._memory_cache[concat_event_id]
 
         else:
-            # first check if we have the comiled function on disk
+            # first check if we have the compiled function on disk
             if os.path.exists(rewgt_path + f"compiled_{concat_event_id}"):
                 print("Loading compiled function from disk")
                 with open(rewgt_path + f"compiled_{concat_event_id}", "rb") as f:
@@ -165,7 +174,6 @@ class madjax_EFT:
 
                 with open(rewgt_path + f"compiled_{concat_event_id}", "wb") as f:
                     pickle.dump(serialized_rewgt, f)
-
 
         return compiled_rewgt(
                 jax.numpy.array([0.0] + WCs),
@@ -202,7 +210,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                         commandline += self.get_LO_definition_from_NLO(proc, self.model)
                     else:
                         commandline += self.get_LO_definition_from_NLO(proc,
-                                                     self.model, real_only=True)
+                                                                       self.model, real_only=True)
                 else:
                     commandline += self.get_LO_definition_from_NLO(proc, self.model)
 
@@ -252,7 +260,6 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             if self.multicore == 'create':
                 print("compile OLP", data['paths'][1])
                 # It is potentially unsafe to use several cores, We limit ourself to one for now
-                # n_cores = self.mother.options['nb_core']
                 n_cores = 1
                 misc.compile(['OLP_static'], cwd=pjoin(path_me, data['paths'][1],'SubProcesses'),
                              nb_core=self.mother.options['nb_core'])
@@ -304,7 +311,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
 
         data={}
         if not second:
-            data['paths'] = ['rw_me', 'rw_mevirt']
+            data['paths'] = ['rw_me_jax', 'rw_mevirt_jax']
             # model
             info = self.banner.get('proc_card', 'full_model_line')
             if '-modelname' in info:
@@ -316,18 +323,14 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             data['processes'] = [line[9:].strip() for line in self.banner.proc_card
                      if line.startswith('generate')]
             data['processes'] += [' '.join(line.split()[2:]) for line in self.banner.proc_card
-                      if re.search('^\s*add\s+process', line)]
-            #object_collector
-            #self.id_to_path = {}
-            #data['id2path'] = self.id_to_path
+                       if re.search('^\s*add\s+process', line)]
         else:
             for key in list(self.f2pylib.keys()):
-                if 'rw_me_%s' % self.nb_library in key[0]:
+                if 'rw_me_jax_%s' % self.nb_library in key[0]:
                     del self.f2pylib[key]
 
             self.nb_library += 1
-            data['paths'] = ['rw_me_%s' % self.nb_library, 'rw_mevirt_%s' % self.nb_library]
-
+            data['paths'] = ['rw_me_jax_%s' % self.nb_library, 'rw_mevirt_jax_%s' % self.nb_library]
 
             # model
             if self.second_model:
@@ -350,9 +353,6 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 data['processes'] += [' '.join(line.split()[2:])
                                       for line in self.banner.proc_card
                                       if re.search('^\s*add\s+process', line)]
-            #object_collector
-            #self.id_to_path_second = {}
-            #data['id2path'] = self.id_to_path_second
 
         # 0. clean previous run ------------------------------------------------
         if not self.rwgt_dir:
@@ -360,6 +360,24 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         else:
             path_me = self.rwgt_dir
         data['path'] = path_me
+
+        # --- SMART BYPASS LOGIC ---
+        target_dir = pjoin(path_me, data['paths'][0])
+        target_check_file = pjoin(target_dir, '__init__.py')
+
+        if os.path.exists(target_dir) and os.path.exists(target_check_file):
+            logger.info(f"MadJax files found in {target_dir}. Bypassing generation.")
+            self.has_standalone_dir = True
+
+            # Retain NLO state before returning early
+            if not second:
+                virt_dir = pjoin(path_me, data['paths'][1])
+                self.has_nlo = os.path.exists(virt_dir)
+
+            if not second and (self.second_model or self.second_process or self.dedicated_path):
+                self.create_standalone_directory(second=True)
+            return
+        # ---------------------------
 
         for i in range(2):
             pdir = pjoin(path_me,data['paths'][i])
@@ -475,7 +493,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             path_me = self.rwgt_dir
 
         self.madjax_objects = {}
-        rwgt_dir_possibility =   ['rw_me','rw_me_%s' % self.nb_library,'rw_mevirt','rw_mevirt_%s' % self.nb_library]
+        rwgt_dir_possibility =   ['rw_me_jax','rw_me_jax_%s' % self.nb_library,'rw_mevirt_jax','rw_mevirt_jax_%s' % self.nb_library]
         for onedir in rwgt_dir_possibility:
             if not os.path.exists(pjoin(path_me,onedir)):
                 continue
@@ -487,10 +505,10 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                     break
 
         with misc.TMP_variable(sys, 'path', [pjoin(path_me)] + sys.path):
-            self.madjax_denominator = madjax.MadJax('rw_me')
+            self.madjax_denominator = madjax.MadJax('rw_me_jax')
         if self.second_process:
             with misc.TMP_variable(sys, 'path', [pjoin(path_me)] + sys.path):
-                self.madjax_numerator = madjax.MadJax('rw_me_2')
+                self.madjax_numerator = madjax.MadJax('rw_me_jax_%s' % self.nb_library)
         else:
             self.madjax_numerator = self.madjax_denominator
 
@@ -510,8 +528,6 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
 
         event.parse_reweight()
         orig_wgt = event.wgt
-
-        # I guess we don't really have the machinery to handle changing the event kinematics in this reweighting plugin
 
         hess_tril = self.madjax_EFT(
                 self.WCs,
@@ -534,13 +550,13 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             path_me = self.me_dir
 
         if self.second_model or self.second_process or self.dedicated_path:
-            rw_dir = pjoin(path_me, 'rw_me_%s' % self.nb_library)
+            rw_dir = pjoin(path_me, 'rw_me_jax_%s' % self.nb_library)
         else:
-            rw_dir = pjoin(path_me, 'rw_me')
+            rw_dir = pjoin(path_me, 'rw_me_jax')
 
         if not '--keep_card' in args:
             if self.has_nlo and self.rwgt_mode != "LO":
-                rwdir_virt = rw_dir.replace('rw_me', 'rw_mevirt')
+                rwdir_virt = rw_dir.replace('rw_me_jax', 'rw_mevirt_jax')
             with open(pjoin(rw_dir, 'Cards', 'param_card.dat'), 'w') as fsock:
                 fsock.write(self.banner['slha'])
             out, cmd = common_run_interface.CommonRunCmd.ask_edit_card_static(cards=['param_card.dat'],
@@ -787,7 +803,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         model_line = self.banner.get('proc_card', 'full_model_line')
 
         if not self.has_standalone_dir:
-            if self.rwgt_dir and os.path.exists(pjoin(self.rwgt_dir,'rw_me','rwgt.pkl')):
+            if self.rwgt_dir and os.path.exists(pjoin(self.rwgt_dir,'rw_me_jax','__init__.py')):
                 self.load_from_pickle()
                 if opts['rwgt_name']:
                     self.options['rwgt_name'] = opts['rwgt_name']
@@ -796,7 +812,7 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 self.load_module()       # load the fortran information from the f2py module
             elif self.multicore == 'wait':
                 i=0
-                while not os.path.exists(pjoin(self.me_dir,'rw_me','rwgt.pkl')):
+                while not os.path.exists(pjoin(self.me_dir,'rw_me_jax','rwgt.pkl')):
                     time.sleep(10+i)
                     i+=5
                     print('wait for pickle')
@@ -826,9 +842,9 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
             path_me = self.me_dir
 
         if self.second_model or self.second_process or self.dedicated_path:
-            rw_dir = pjoin(path_me, 'rw_me_%s' % self.nb_library)
+            rw_dir = pjoin(path_me, 'rw_me_jax_%s' % self.nb_library)
         else:
-            rw_dir = pjoin(path_me, 'rw_me')
+            rw_dir = pjoin(path_me, 'rw_me_jax')
 
         start = time.time()
         # initialize the collector for the various re-weighting
@@ -875,6 +891,21 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
         print('===================================================')
         print(pdgIds_list)
 
+        # =====================================================================
+        # --- ISOLATED COMPILATION TARGETING ---
+        # =====================================================================
+        compile_idx_env = os.environ.get("JAX_COMPILE_INDEX")
+
+        if compile_idx_env is not None:
+            local_compile_idx = int(compile_idx_env)
+            if local_compile_idx >= len(pdgIds_list):
+                print(f"Index {local_compile_idx} > available subprocesses ({len(pdgIds_list)}). Exiting cleanly.")
+                sys.exit(0)
+
+            pdgIds_list = [pdgIds_list[local_compile_idx]]
+            print(f"ISOLATED COMPILATION MODE: Targeting subprocess {pdgIds_list[0]}")
+        # =====================================================================
+
         if self.lhe_input.closed:
             self.lhe_input = lhe_parser.EventFile(self.lhe_input.name)
         self.lhe_input.seek(0)
@@ -898,8 +929,16 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 if (event_nb==10001): logger.info('reducing number of print status. Next status update in 10000 events')
                 if (event_nb==100001): logger.info('reducing number of print status. Next status update in 100000 events')
 
-
                 weight = self.calculate_weight(event)
+
+                # =============================================================
+                # --- EARLY EXIT FOR COMPILATION ---
+                # =============================================================
+                if is_compile_only:
+                    print("Compilation successful and cached to disk. Exiting to free memory.")
+                    sys.exit(0)
+                # =============================================================
+
                 if not isinstance(weight, dict):
                     weight = {'':weight}
 
