@@ -38,7 +38,7 @@ rewgt_path = os.environ.get("JAX_REWGT_CACHE_PATH", "reweight_functions/")
 os.makedirs(rewgt_path, exist_ok=True)
 
 # Suppress logs only if we are in compile mode to save disk space
-log_level = logging.ERROR if is_compile_only else logging.DEBUG
+log_level = logging.ERROR
 
 logger = logging.getLogger('decay.stdout') # -> stdout
 logger.setLevel(log_level)
@@ -823,6 +823,15 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 self.load_module()
             else:
                 self.create_standalone_directory()
+
+                # =========================================================
+                # --- EARLY EXIT FOR ME CODE PREP PHASE ---
+                if os.environ.get("JAX_ME_GEN_ONLY") == "1":
+                    logger.info("JAX_ME_GEN_ONLY caught. ME code generated successfully. Exiting.")
+                    import sys
+                    sys.exit(0)
+                # =========================================================
+
                 self.compile()
                 self.load_module()
                 if self.multicore == 'create':
