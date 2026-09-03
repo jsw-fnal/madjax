@@ -828,7 +828,6 @@ class EFT_madjax_reweight(rwgt_interface.ReweightInterface):
                 # --- EARLY EXIT FOR ME CODE PREP PHASE ---
                 if os.environ.get("JAX_ME_GEN_ONLY") == "1":
                     logger.info("JAX_ME_GEN_ONLY caught. ME code generated successfully. Exiting.")
-                    import sys
                     sys.exit(0)
                 # =========================================================
 
